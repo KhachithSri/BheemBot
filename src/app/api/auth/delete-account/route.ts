@@ -1,0 +1,51 @@
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { NextResponse } from "next/server";
+
+export async function POST() {
+  try {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const userId = user.id;
+
+    const cleanupResults = await Promise.all([
+      supabaseAdmin.from("interviews").delete().eq("userId", userId),
+      // Removing an organization cascades to its projects and memberships.
+      supabaseAdmin.from("organizations").delete().eq("ownerId", userId),
+      supabaseAdmin.from("audit_logs").delete().eq("userId", userId),
+      supabaseAdmin.from("webhooks").delete().eq("userId", userId),
+    ]);
+
+    const cleanupError = cleanupResults.find((result) => result.error)?.error;
+    if (cleanupError) {
+      return NextResponse.json(
+        { error: `Could not remove account data: ${cleanupError.message}` },
+        { status: 500 },
+      );
+    }
+
+    const { error: deleteError } =
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+
+    if (deleteError) {
+      return NextResponse.json(
+        { error: deleteError.message },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
