@@ -1,34 +1,44 @@
-const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-const PHONE_PATTERN = /(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)/g;
-const CARD_PATTERN = /(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g;
-const URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
+import { PIIDetector, type PIIType } from "./pii-detector";
 
 export interface PrivacyResult {
   text: string;
   redactions: number;
+  types: PIIType[];
 }
 
-/** Remove common direct identifiers before text is sent to a hosted LLM. */
-export function minimizePii(input: string): PrivacyResult {
-  let text = input;
-  let redactions = 0;
+const REPLACEMENTS: Record<PIIType, string> = {
+  email: "[EMAIL]",
+  phone: "[PHONE]",
+  ssn: "[SSN]",
+  credit_card: "[NUMBER]",
+  name: "[NAME]",
+  address: "[ADDRESS]",
+  dob: "[DATE]",
+  url: "[URL]",
+  ip_address: "[IP]",
+  iban: "[IBAN]",
+  credential: "[SECRET]",
+};
 
-  for (const [pattern, replacement] of [
-    [EMAIL_PATTERN, "[EMAIL]"],
-    [PHONE_PATTERN, "[PHONE]"],
-    [CARD_PATTERN, "[NUMBER]"],
-  ] as const) {
-    text = text.replace(pattern, () => {
-      redactions += 1;
-      return replacement;
-    });
+const detector = new PIIDetector();
+
+/** Remove supported direct identifiers before text reaches a hosted model. */
+export function minimizePii(input: string): PrivacyResult {
+  const entities = detector.detectPII(input).filter(
+    (entity) => entity.confidence >= 0.7,
+  );
+  let text = input;
+
+  for (const entity of [...entities].reverse()) {
+    text =
+      text.slice(0, entity.start) +
+      REPLACEMENTS[entity.type] +
+      text.slice(entity.end);
   }
 
-  text = text.replace(URL_PATTERN, (match) => {
-    redactions += 1;
-    const punctuation = match.match(/[.,!?;:]+$/)?.[0] || "";
-    return `[URL]${punctuation}`;
-  });
-
-  return { text, redactions };
+  return {
+    text,
+    redactions: entities.length,
+    types: Array.from(new Set(entities.map((entity) => entity.type))),
+  };
 }

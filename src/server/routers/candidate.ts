@@ -1,3 +1,10 @@
+import { randomUUID } from "node:crypto";
+import {
+  candidateInviteHash,
+  decryptCandidateData,
+  encryptCandidateData,
+  type CandidateSensitiveData,
+} from "@/lib/privacy/candidate-encryption";
 import { nanoid } from "@/lib/id";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -81,16 +88,28 @@ export const candidateRouter = router({
       );
       assertMinRole(role, "MEMBER");
 
+      const id = randomUUID();
       const inviteToken = nanoid(12);
       if (fields.email === "") fields.email = undefined;
 
       const { data: candidate, error } = await ctx.supabase
         .from("candidates")
         .insert({
+          ...encryptCandidateData(id, {
+            name: fields.name,
+            email: fields.email || null,
+            phone: fields.phone || null,
+            gender: fields.gender || null,
+            birthday: fields.birthday || null,
+            notes: fields.notes || null,
+            education: fields.education || null,
+            school: fields.school || null,
+            major: fields.major || null,
+            graduationYear: fields.graduationYear ?? null,
+            workExperience: fields.workExperience || null,
+            inviteToken,
+          }),
           interviewId,
-          ...fields,
-          email: fields.email || null,
-          inviteToken,
         })
         .select("*")
         .single();
@@ -99,7 +118,7 @@ export const candidateRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       }
 
-      return candidate;
+      return decryptCandidateData(candidate);
     }),
 
   bulkCreate: protectedProcedure
@@ -128,12 +147,27 @@ export const candidateRouter = router({
         return true;
       });
 
-      const rows = deduped.map((c) => ({
-        interviewId,
-        ...c,
-        email: c.email?.trim().toLowerCase() || null,
-        inviteToken: nanoid(12),
-      }));
+      const rows = deduped.map((candidate) => {
+        const inviteToken = nanoid(12);
+        const data: CandidateSensitiveData = {
+          name: candidate.name,
+          email: candidate.email?.trim().toLowerCase() || null,
+          phone: candidate.phone || null,
+          gender: candidate.gender || null,
+          birthday: candidate.birthday || null,
+          notes: candidate.notes || null,
+          education: candidate.education || null,
+          school: candidate.school || null,
+          major: candidate.major || null,
+          graduationYear: candidate.graduationYear ?? null,
+          workExperience: candidate.workExperience || null,
+          inviteToken,
+        };
+        return {
+          ...encryptCandidateData(randomUUID(), data),
+          interviewId,
+        };
+      });
 
       if (rows.length === 0) {
         return { created: 0, total: deduped.length };
@@ -148,7 +182,10 @@ export const candidateRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       }
 
-      return { created: data?.length ?? 0, total: deduped.length };
+      return {
+        created: data?.length ?? 0,
+        total: deduped.length,
+      };
     }),
 
   list: protectedProcedure
@@ -189,7 +226,12 @@ export const candidateRouter = router({
         }),
       );
 
-      return { candidates: candidates ?? [], walkInSessions };
+      return {
+        candidates: (candidates ?? []).map((candidate) =>
+          decryptCandidateData(candidate),
+        ),
+        walkInSessions,
+      };
     }),
 
   update: protectedProcedure
@@ -215,7 +257,7 @@ export const candidateRouter = router({
       // Get candidate's interview to verify access
       const { data: candidate } = await ctx.supabase
         .from("candidates")
-        .select("interviewId")
+        .select("*")
         .eq("id", id)
         .single();
 
@@ -230,9 +272,27 @@ export const candidateRouter = router({
       );
       assertMinRole(role, "MEMBER");
 
+      const current = decryptCandidateData(candidate);
+      const updatedData: CandidateSensitiveData = {
+        name: fields.name ?? current.name,
+        email: fields.email === undefined ? current.email : fields.email || null,
+        phone: fields.phone === undefined ? current.phone : fields.phone || null,
+        gender: fields.gender === undefined ? current.gender : fields.gender || null,
+        birthday: fields.birthday === undefined ? current.birthday : fields.birthday || null,
+        notes: fields.notes === undefined ? current.notes : fields.notes || null,
+        education: fields.education === undefined ? current.education : fields.education || null,
+        school: fields.school === undefined ? current.school : fields.school || null,
+        major: fields.major === undefined ? current.major : fields.major || null,
+        graduationYear: fields.graduationYear === undefined ? current.graduationYear : fields.graduationYear,
+        workExperience: fields.workExperience === undefined ? current.workExperience : fields.workExperience || null,
+        inviteToken: current.inviteToken,
+      };
       const { data: updated, error } = await ctx.supabase
         .from("candidates")
-        .update({ ...fields, updatedAt: new Date().toISOString() })
+        .update({
+          ...encryptCandidateData(id, updatedData),
+          updatedAt: new Date().toISOString(),
+        })
         .eq("id", id)
         .select("*, session:sessions(*)")
         .single();
@@ -241,7 +301,7 @@ export const candidateRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Candidate not found" });
       }
 
-      return updated;
+      return decryptCandidateData(updated);
     }),
 
   remove: protectedProcedure
@@ -429,7 +489,9 @@ export const candidateRouter = router({
       );
 
       return {
-        candidates: candidates ?? [],
+        candidates: (candidates ?? []).map((candidate) =>
+          decryptCandidateData(candidate),
+        ),
         walkInSessions,
         interviewMap,
       };
@@ -438,15 +500,22 @@ export const candidateRouter = router({
   getByToken: publicProcedure
     .input(z.object({ token: z.string() }))
     .query(async ({ ctx, input }) => {
-      const { data: candidate } = await ctx.supabase
+      const { data: hashedCandidate } = await ctx.supabase
         .from("candidates")
-        .select(
-          "*, session:sessions(*), interview:interviews(*, questions(*))",
-        )
-        .eq("inviteToken", input.token)
-        .single();
+        .select("id, interviewId, sessionId, session:sessions(*), interview:interviews(*, questions(*))")
+        .eq("inviteTokenHash", candidateInviteHash(input.token))
+        .maybeSingle();
 
-      if (!candidate) {
+      const { data: legacyCandidate } = hashedCandidate
+        ? { data: null }
+        : await ctx.supabase
+            .from("candidates")
+            .select("id, interviewId, sessionId, session:sessions(*), interview:interviews(*, questions(*))")
+            .eq("inviteToken", input.token)
+            .maybeSingle();
+      const storedCandidate = hashedCandidate ?? legacyCandidate;
+
+      if (!storedCandidate) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invalid invite link",
@@ -454,7 +523,7 @@ export const candidateRouter = router({
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const interview = candidate.interview as any;
+      const interview = storedCandidate.interview as any;
       if (!interview) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -462,6 +531,10 @@ export const candidateRouter = router({
         });
       }
 
-      return candidate;
+      return {
+        id: storedCandidate.id,
+        session: storedCandidate.session,
+        interview,
+      };
     }),
 });

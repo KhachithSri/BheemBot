@@ -42,6 +42,12 @@ export async function POST(req: Request) {
     ) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
+    if (interviewSession.contentPurgedAt) {
+      return NextResponse.json(
+        { error: "Session content is no longer available" },
+        { status: 410 },
+      );
+    }
 
     const interview = interviewSession.interview as {
       title: string;
@@ -167,7 +173,7 @@ export async function POST(req: Request) {
       insightsData.toneAnalysis = parsed.toneAnalysis;
     }
 
-    const { error: updateError } = await supabaseAdmin
+    const { data: updatedSession, error: updateError } = await supabaseAdmin
       .from("sessions")
       .update({
         summary: String(parsed.summary ?? ""),
@@ -175,10 +181,19 @@ export async function POST(req: Request) {
         sentiment: parsed.sentiment ?? null,
         insights: insightsData,
       })
-      .eq("id", sessionId);
+      .eq("id", sessionId)
+      .is("contentPurgedAt", null)
+      .select("id")
+      .maybeSingle();
 
     if (updateError) {
       throw new Error(`Failed to save generated report: ${updateError.message}`);
+    }
+    if (!updatedSession) {
+      return NextResponse.json(
+        { error: "Session content is no longer available" },
+        { status: 410 },
+      );
     }
 
     if (!String(parsed.summary ?? "").trim()) {

@@ -80,6 +80,7 @@ async function parseOneResume(
   const decoder = new TextDecoder();
   let accumulated = "";
   let buffer = "";
+  let localFields: Partial<ParsedCandidate> = {};
 
   while (true) {
     const { done, value } = await reader.read();
@@ -95,8 +96,11 @@ async function parseOneResume(
       if (payload === "[DONE]") continue;
 
       try {
-        const { token, error } = JSON.parse(payload);
+        const { token, error, localFields: extractedFields } = JSON.parse(payload);
         if (error) throw new Error(error);
+        if (extractedFields) {
+          localFields = { ...localFields, ...extractedFields };
+        }
         if (token) {
           accumulated += token;
           onStream(accumulated);
@@ -112,7 +116,7 @@ async function parseOneResume(
     .replace(/```\s*/g, "")
     .trim();
 
-  return JSON.parse(cleaned) as ParsedCandidate;
+  return { ...JSON.parse(cleaned), ...localFields } as ParsedCandidate;
 }
 
 export function ResumeImportDialog({

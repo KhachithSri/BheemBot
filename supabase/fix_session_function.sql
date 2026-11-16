@@ -33,9 +33,13 @@ BEGIN
 END;
 $$;
 
--- Grant execute permission
-GRANT EXECUTE ON FUNCTION public.create_interview_session TO authenticated;
-GRANT EXECUTE ON FUNCTION public.create_interview_session TO anon;
+-- Session creation must go through the authenticated application server.
+REVOKE ALL ON FUNCTION public.create_interview_session(
+  uuid, text, text, "InterviewMode", uuid
+) FROM PUBLIC, authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.create_interview_session(
+  uuid, text, text, "InterviewMode", uuid
+) TO service_role;
 
 -- Verify function was created
 SELECT 

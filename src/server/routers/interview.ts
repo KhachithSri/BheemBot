@@ -1,6 +1,7 @@
 import { nanoid } from "@/lib/id";
 import { INTERVIEW_TEMPLATES } from "@/lib/interview-templates";
 import { getSessionOverallScore } from "@/lib/session-score";
+import { removeSessionMedia } from "@/lib/privacy/session-retention";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -650,7 +651,28 @@ export const interviewRouter = router({
         assertMinRole(result.role, "MEMBER");
       }
 
-      await ctx.supabase.from("interviews").delete().eq("id", input.id);
+      const { data: sessions, error: sessionError } = await ctx.supabase
+        .from("sessions")
+        .select("id")
+        .eq("interviewId", input.id);
+      if (sessionError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: sessionError.message,
+        });
+      }
+      await removeSessionMedia((sessions ?? []).map((session) => session.id));
+
+      const { error: deleteError } = await ctx.supabase
+        .from("interviews")
+        .delete()
+        .eq("id", input.id);
+      if (deleteError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: deleteError.message,
+        });
+      }
       return { success: true };
     }),
 
@@ -681,7 +703,28 @@ export const interviewRouter = router({
         }),
       );
 
-      await ctx.supabase.from("interviews").delete().in("id", input.ids);
+      const { data: sessions, error: sessionError } = await ctx.supabase
+        .from("sessions")
+        .select("id")
+        .in("interviewId", input.ids);
+      if (sessionError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: sessionError.message,
+        });
+      }
+      await removeSessionMedia((sessions ?? []).map((session) => session.id));
+
+      const { error: deleteError } = await ctx.supabase
+        .from("interviews")
+        .delete()
+        .in("id", input.ids);
+      if (deleteError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: deleteError.message,
+        });
+      }
       return { success: true, count: input.ids.length };
     }),
 

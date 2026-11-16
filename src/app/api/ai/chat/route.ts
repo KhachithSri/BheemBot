@@ -1,7 +1,8 @@
 import { buildInterviewerPrompt } from "@/lib/ai/prompts/interviewer";
 import { getProvider } from "@/lib/ai/registry";
 import { createLogger } from "@/lib/logger";
-import { PIIDetector } from "@/lib/privacy/pii-detector";
+import { minimizePii } from "@/lib/privacy/minimize";
+import { recordPrivacyEvents } from "@/lib/privacy/privacy-events";
 import type { LLMMessage } from "@/lib/ai/types";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
@@ -13,6 +14,31 @@ export async function POST(req: Request) {
     await req.json();
 
   try {
+    if (typeof sessionId !== "string" || !sessionId) {
+      return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+    }
+
+    const { data: session, error: sessionError } = await supabaseAdmin
+      .from("sessions")
+      .select("status, contentPurgedAt")
+      .eq("id", sessionId)
+      .single();
+    if (sessionError) {
+      throw new Error(`Could not load session: ${sessionError.message}`);
+    }
+    if (session.contentPurgedAt) {
+      return NextResponse.json(
+        { error: "Session content is no longer available" },
+        { status: 410 },
+      );
+    }
+    if (session.status !== "IN_PROGRESS") {
+      return NextResponse.json(
+        { error: "Session is no longer active" },
+        { status: 400 },
+      );
+    }
+
     const { data: interview } = await supabaseAdmin
       .from("interviews")
       .select("*, questions(*)")
@@ -29,32 +55,15 @@ export async function POST(req: Request) {
 
     const provider = getProvider(interview.llmProvider);
 
-    const piiDetector = new PIIDetector();
-    
     const conversationHistory: LLMMessage[] = messages.map(
-      (m: { role: "user" | "assistant"; content: string }) => {
-        const detectedPII = piiDetector.detectPII(m.content);
-        const filteredContent = detectedPII.length > 0 
-          ? piiDetector.maskPII(m.content)
-          : m.content;
-        
-        if (detectedPII.length > 0) {
-          void supabaseAdmin.from("privacy_events").insert({
-            session_id: sessionId,
-            pii_types: detectedPII.map(e => e.type),
-            pii_count: detectedPII.length,
-            original_content: m.content,
-            masked_content: filteredContent,
-            confidence_threshold: 0.7
-          });
-          log.info(`PII detected and masked in message: ${detectedPII.length} entities`);
-        }
-        
-        return {
-          role: m.role as "user" | "assistant",
-          content: filteredContent,
-        };
-      },
+      (m: { role: "user" | "assistant"; content: string }) => ({
+        role: m.role,
+        content: minimizePii(m.content).text,
+      }),
+    );
+
+    await recordPrivacyEvents(
+      messages.map((m: { content: string }) => ({ sessionId, content: m.content })),
     );
 
     const promptMessages = buildInterviewerPrompt({
@@ -71,20 +80,24 @@ export async function POST(req: Request) {
       model: interview.llmModel ?? undefined,
     });
 
-    const isComplete = response.content.includes("[INTERVIEW_COMPLETE]");
-    const questionAdvanced = response.content.includes("[NEXT_QUESTION]");
+    const safeResponse = minimizePii(response.content).text;
+    const isComplete = safeResponse.includes("[INTERVIEW_COMPLETE]");
+    const questionAdvanced = safeResponse.includes("[NEXT_QUESTION]");
 
-    const cleanContent = response.content
+    const cleanContent = safeResponse
       .replace("[INTERVIEW_COMPLETE]", "")
       .replace("[NEXT_QUESTION]", "")
       .trim();
 
-    await supabaseAdmin.from("messages").insert({
+    const { error: saveError } = await supabaseAdmin.from("messages").insert({
       sessionId,
       role: "ASSISTANT" as const,
       content: cleanContent,
       wordCount: cleanContent.split(/\s+/).length,
     });
+    if (saveError) {
+      throw new Error(`Could not save assistant message: ${saveError.message}`);
+    }
 
     if (questionAdvanced) {
       const nextIndex = (currentQuestionIndex ?? 0) + 1;

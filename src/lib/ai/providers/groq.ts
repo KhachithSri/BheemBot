@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { sanitizeLLMMessages } from "../sanitize";
 import { type LLMProvider, type GenerationParams, type LLMResponse, type LLMMessage } from "../types";
 
 export class GroqProvider implements LLMProvider {
@@ -33,9 +34,10 @@ export class GroqProvider implements LLMProvider {
     params: GenerationParams & { model?: string }
   ): Promise<LLMResponse> {
     const model = params.model ?? this.defaultModel;
+    const messages = sanitizeLLMMessages(params.messages);
     const response = await this.client.chat.completions.create({
       model,
-      messages: this.toOpenAIMessages(params.messages),
+      messages: this.toOpenAIMessages(messages),
       temperature: params.temperature ?? 0.7,
       max_tokens: params.maxTokens ?? 2048,
     });
@@ -58,9 +60,10 @@ export class GroqProvider implements LLMProvider {
     params: GenerationParams & { model?: string }
   ): AsyncIterable<string> {
     const model = params.model ?? this.defaultModel;
+    const messages = sanitizeLLMMessages(params.messages);
     const stream = await this.client.chat.completions.create({
       model,
-      messages: this.toOpenAIMessages(params.messages),
+      messages: this.toOpenAIMessages(messages),
       temperature: params.temperature ?? 0.7,
       max_tokens: params.maxTokens ?? 2048,
       stream: true,

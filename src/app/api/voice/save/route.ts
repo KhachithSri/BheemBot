@@ -3,33 +3,34 @@ import { extractJson } from "@/lib/ai/extract-json";
 import { buildSummaryPrompt } from "@/lib/ai/prompts/summary";
 import { getProvider, REPORT_MODEL } from "@/lib/ai/registry";
 import { createLogger } from "@/lib/logger";
-import { PIIDetector } from "@/lib/privacy/pii-detector";
+import { minimizePii } from "@/lib/privacy/minimize";
+import { recordPrivacyEvents } from "@/lib/privacy/privacy-events";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 import { handleVoiceSave, type CompletionSession, type ProgressSession, type VoiceSaveOps, type VoiceSavePayload } from "./logic";
 
 const log = createLogger("api/voice/save");
-const piiDetector = new PIIDetector();
 
 const voiceSaveOps: VoiceSaveOps = {
   async insertMessages(sessionId, messages) {
+    const { data: session, error: sessionError } = await supabaseAdmin
+      .from("sessions")
+      .select("status, contentPurgedAt")
+      .eq("id", sessionId)
+      .single();
+    if (sessionError) {
+      throw new Error(`Could not load session before saving messages: ${sessionError.message}`);
+    }
+    if (session.contentPurgedAt || session.status !== "IN_PROGRESS") {
+      throw new Error("Session is no longer available for saving content");
+    }
+
+    await recordPrivacyEvents(
+      messages.map((message) => ({ sessionId, content: message.content })),
+    );
+
     const processedMessages = messages.map((m) => {
-      const detectedPII = piiDetector.detectPII(m.content);
-      const filteredContent = detectedPII.length > 0 
-        ? piiDetector.maskPII(m.content)
-        : m.content;
-      
-      if (detectedPII.length > 0) {
-        void supabaseAdmin.from("privacy_events").insert({
-          session_id: sessionId,
-          pii_types: detectedPII.map(e => e.type),
-          pii_count: detectedPII.length,
-          original_content: m.content,
-          masked_content: filteredContent,
-          confidence_threshold: 0.7
-        });
-        log.info(`PII detected and masked in voice message: ${detectedPII.length} entities`);
-      }
+      const filteredContent = minimizePii(m.content).text;
       
       return {
         sessionId,
@@ -42,7 +43,10 @@ const voiceSaveOps: VoiceSaveOps = {
       };
     });
     
-    await supabaseAdmin.from("messages").insert(processedMessages);
+    const { error } = await supabaseAdmin.from("messages").insert(processedMessages);
+    if (error) {
+      throw new Error(`Could not save voice messages: ${error.message}`);
+    }
   },
   async loadSessionForCompletion(sessionId) {
     const { data } = await supabaseAdmin
@@ -84,7 +88,12 @@ const voiceSaveOps: VoiceSaveOps = {
     return (data as ProgressSession | null) ?? null;
   },
   async updateSession(sessionId, payload) {
-    await supabaseAdmin.from("sessions").update(payload).eq("id", sessionId);
+    const { error } = await supabaseAdmin
+      .from("sessions")
+      .update(payload)
+      .eq("id", sessionId)
+      .is("contentPurgedAt", null);
+    if (error) throw new Error(`Could not update session: ${error.message}`);
   },
   generateSummary,
   log,
@@ -111,6 +120,16 @@ async function generateSummary(
   assessmentCriteria?: { name: string; description: string }[] | null,
 ): Promise<void> {
   try {
+    const { data: session, error: sessionError } = await supabaseAdmin
+      .from("sessions")
+      .select("contentPurgedAt")
+      .eq("id", sessionId)
+      .single();
+    if (sessionError) {
+      throw new Error(`Could not check session retention state: ${sessionError.message}`);
+    }
+    if (session.contentPurgedAt) return;
+
     const { data: allMessages } = await supabaseAdmin
       .from("messages")
       .select("*")
@@ -245,7 +264,7 @@ async function generateSummary(
       insightsData.toneAnalysis = parsed.toneAnalysis;
     }
 
-    await supabaseAdmin
+    const { data: updatedSession, error: updateError } = await supabaseAdmin
       .from("sessions")
       .update({
         summary: String(parsed.summary ?? ""),
@@ -253,7 +272,14 @@ async function generateSummary(
         sentiment: parsed.sentiment ?? null,
         insights: insightsData,
       })
-      .eq("id", sessionId);
+      .eq("id", sessionId)
+      .is("contentPurgedAt", null)
+      .select("id")
+      .maybeSingle();
+    if (updateError) {
+      throw new Error(`Could not save generated summary: ${updateError.message}`);
+    }
+    if (!updatedSession) return;
 
     const themeCount = Array.isArray(parsed.themes) ? parsed.themes.length : 0;
     const insightCount = Array.isArray(parsed.keyInsights)

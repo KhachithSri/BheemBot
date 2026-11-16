@@ -334,6 +334,7 @@ export function CandidateCreateDialog({
         const decoder = new TextDecoder();
         let accumulated = "";
         let buffer = "";
+        let localFields: Partial<Record<"name" | "email" | "phone", string>> = {};
 
         while (true) {
           const { done, value } = await reader.read();
@@ -349,7 +350,7 @@ export function CandidateCreateDialog({
             if (payload === "[DONE]") continue;
 
             try {
-              const { token, error } = JSON.parse(payload);
+              const { token, error, localFields: extractedFields } = JSON.parse(payload);
               if (error) {
                 toast({
                   title: "Parse error",
@@ -357,6 +358,9 @@ export function CandidateCreateDialog({
                   variant: "destructive",
                 });
                 continue;
+              }
+              if (extractedFields) {
+                localFields = { ...localFields, ...extractedFields };
               }
               if (token) {
                 accumulated += token;
@@ -375,7 +379,7 @@ export function CandidateCreateDialog({
           .trim();
 
         try {
-          const parsed = JSON.parse(cleaned);
+          const parsed = { ...JSON.parse(cleaned), ...localFields };
           applyParsedData(parsed, setForm);
           toast({ title: "Resume parsed successfully" });
         } catch {

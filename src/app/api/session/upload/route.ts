@@ -35,6 +35,31 @@ export async function POST(req: Request) {
       );
     }
 
+    const { data: session, error: sessionError } = await supabaseAdmin
+      .from("sessions")
+      .select("status, contentPurgedAt")
+      .eq("id", sessionId)
+      .maybeSingle();
+    if (sessionError) {
+      log.error("Could not verify session before upload:", sessionError);
+      return NextResponse.json(
+        { error: "Could not verify session" },
+        { status: 500 },
+      );
+    }
+    if (!session || session.contentPurgedAt) {
+      return NextResponse.json(
+        { error: "Session content is no longer available" },
+        { status: 410 },
+      );
+    }
+    if (session.status !== "IN_PROGRESS") {
+      return NextResponse.json(
+        { error: "Session is no longer active" },
+        { status: 400 },
+      );
+    }
+
     const bucket = type === "recording" ? "recordings" : "screenshots";
     const defaultExt = type === "recording"
       ? (file.type?.includes("mp4") || file.type?.includes("m4a") ? "m4a" : "webm")

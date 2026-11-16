@@ -1,7 +1,10 @@
 import OpenAI from "openai";
 import { getAuthUser } from "@/lib/auth";
 import { createLogger } from "@/lib/logger";
+import { PIIDetector } from "@/lib/privacy/pii-detector";
+import { minimizePii } from "@/lib/privacy/minimize";
 const log = createLogger("api/ai/parse-resume");
+const piiDetector = new PIIDetector();
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require("pdf-parse") as (
   buffer: Buffer,
@@ -40,6 +43,34 @@ function getClient(): { client: OpenAI; model: string } {
   };
 }
 
+function extractLocalIdentifiers(text: string): {
+  fields: { name?: string; email?: string; phone?: string };
+  minimizedText: string;
+} {
+  const entities = piiDetector.detectPII(text);
+  const fields: { name?: string; email?: string; phone?: string } = {};
+  for (const entity of entities) {
+    if (entity.type === "email" && !fields.email) fields.email = entity.value;
+    if (entity.type === "phone" && !fields.phone) fields.phone = entity.value;
+    if (entity.type === "name" && !fields.name) fields.name = entity.value;
+  }
+
+  const firstLine = text.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  const headerName = firstLine?.match(
+    /^([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,2})(?=\s|[|,·-]|$)/,
+  )?.[1];
+  if (!fields.name && headerName) {
+    fields.name = headerName;
+  }
+
+  let minimizedText = minimizePii(text).text;
+  if (headerName) {
+    minimizedText = minimizedText.replace(headerName, "[NAME]");
+  }
+
+  return { fields, minimizedText };
+}
+
 export async function POST(req: Request) {
   try {
     const user = await getAuthUser();
@@ -71,6 +102,8 @@ export async function POST(req: Request) {
       );
     }
 
+    const { fields: localFields, minimizedText } =
+      extractLocalIdentifiers(resumeText);
     const { client, model } = getClient();
 
     // Stream the LLM response via SSE
@@ -79,7 +112,7 @@ export async function POST(req: Request) {
       messages: [
         {
           role: "system",
-          content: `${SYSTEM_PROMPT}\n\nThe following is the full text extracted from the candidate's resume. Parse it carefully and extract ALL fields including email and phone:\n\n${resumeText}`,
+          content: `${SYSTEM_PROMPT}\n\nThe following is minimized text extracted from the candidate's resume. Parse the available fields; direct contact identifiers have been removed and are returned separately by the application:\n\n${minimizedText}`,
         },
         {
           role: "user",
@@ -103,6 +136,11 @@ export async function POST(req: Request) {
               );
             }
           }
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ localFields })}\n\n`,
+            ),
+          );
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
         } catch (err) {

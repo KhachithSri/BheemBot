@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "./types";
+import { getSupabaseUrl } from "./url";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 500;
@@ -31,7 +32,7 @@ export function createClient() {
   const cookieStore = cookies();
 
   return createServerClient<Database>(
-    process.env.SUPABASE_URL!,
+    getSupabaseUrl(process.env.SUPABASE_URL),
     process.env.SUPABASE_ANON_KEY!,
     {
       cookies: {

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseUrl } from "./url";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 500;
@@ -30,7 +31,7 @@ async function fetchWithRetry(
  * Regenerate types with `npm run db:types` after schema changes for full safety.
  */
 export const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
+  getSupabaseUrl(process.env.SUPABASE_URL),
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   {
     auth: {

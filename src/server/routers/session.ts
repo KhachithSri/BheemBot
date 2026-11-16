@@ -1,4 +1,12 @@
 import { createLogger } from "@/lib/logger";
+import {
+  candidateEmailLookup,
+  candidateInviteHash,
+  decryptCandidateData,
+} from "@/lib/privacy/candidate-encryption";
+import { minimizePii } from "@/lib/privacy/minimize";
+import { recordPrivacyEvents } from "@/lib/privacy/privacy-events";
+import { removeSessionMedia } from "@/lib/privacy/session-retention";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { filterAccessibleProjectIds, hasProjectAccess, protectedProcedure, publicProcedure, router } from "../trpc";
@@ -30,7 +38,7 @@ export const sessionRouter = router({
         });
       }
 
-      // Enforce invite-only access via candidates table
+      let invitedCandidateId: string | null = null;
       if (interview.requireInvite) {
         const email = input.participantEmail?.trim().toLowerCase();
         if (!email) {
@@ -39,35 +47,55 @@ export const sessionRouter = router({
             message: "Email is required for invite-only interviews.",
           });
         }
-        const { data: candidate } = await ctx.supabase
+        const { data: hashedCandidate } = await ctx.supabase
           .from("candidates")
           .select("id")
           .eq("interviewId", interview.id)
-          .eq("email", email)
-          .single();
+          .eq("emailLookup", candidateEmailLookup(email))
+          .maybeSingle();
 
-        if (!candidate) {
+        const { data: legacyCandidate } = hashedCandidate
+          ? { data: null }
+          : await ctx.supabase
+              .from("candidates")
+              .select("id")
+              .eq("interviewId", interview.id)
+              .eq("email", email)
+              .maybeSingle();
+
+        const invitedCandidate = hashedCandidate ?? legacyCandidate;
+        if (!invitedCandidate) {
           throw new TRPCError({
             code: "FORBIDDEN",
             message: "Your email is not on the invite list for this interview.",
           });
         }
+        invitedCandidateId = invitedCandidate.id;
       }
 
       const questions = (interview.questions ?? []) as { id: string }[];
 
       const derivedMode = interview.voiceEnabled ? "VOICE" : "CHAT";
+      if (interview.requireInvite && !invitedCandidateId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Invited candidate lookup did not return an ID",
+        });
+      }
 
-      const { data: sessionJson, error } = await ctx.supabase.rpc(
-        "create_interview_session",
-        {
-          p_interview_id: interview.id,
-          p_participant_name: input.participantName ?? null,
-          p_participant_email: input.participantEmail ?? null,
-          p_mode_used: derivedMode,
-          p_current_question_id: questions[0]?.id ?? null,
-        },
-      );
+      const { data: sessionJson, error } = interview.requireInvite
+        ? await ctx.supabase.rpc("create_invite_session_secure", {
+            p_candidate_id: invitedCandidateId,
+            p_mode_used: derivedMode,
+            p_current_question_id: questions[0]?.id ?? null,
+          })
+        : await ctx.supabase.rpc("create_interview_session", {
+            p_interview_id: interview.id,
+            p_participant_name: input.participantName ?? null,
+            p_participant_email: input.participantEmail ?? null,
+            p_mode_used: derivedMode,
+            p_current_question_id: questions[0]?.id ?? null,
+          });
 
       if (error) {
         log.error("RPC error (create):", error);
@@ -166,16 +194,26 @@ export const sessionRouter = router({
     .input(z.object({ inviteToken: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // Look up candidate + interview via the RPC
-      const { data: candidate } = await ctx.supabase
+      const { data: hashedCandidate } = await ctx.supabase
         .from("candidates")
         .select("*, interview:interviews(*, questions(*))")
-        .eq("inviteToken", input.inviteToken)
-        .single();
+        .eq("inviteTokenHash", candidateInviteHash(input.inviteToken))
+        .maybeSingle();
 
-      if (!candidate) {
+      const { data: legacyCandidate } = hashedCandidate
+        ? { data: null }
+        : await ctx.supabase
+            .from("candidates")
+            .select("*, interview:interviews(*, questions(*))")
+            .eq("inviteToken", input.inviteToken)
+            .maybeSingle();
+      const storedCandidate = hashedCandidate ?? legacyCandidate;
+
+      if (!storedCandidate) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Invalid invite link" });
       }
 
+      const candidate = decryptCandidateData(storedCandidate);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const interview = candidate.interview as any;
       if (!interview) {
@@ -203,9 +241,9 @@ export const sessionRouter = router({
       const derivedMode = interview.voiceEnabled ? "VOICE" : "CHAT";
 
       const { data: sessionJson, error } = await ctx.supabase.rpc(
-        "create_invite_session",
+        "create_invite_session_secure",
         {
-          p_invite_token: input.inviteToken,
+          p_candidate_id: candidate.id,
           p_mode_used: derivedMode,
           p_current_question_id: questions[0]?.id ?? null,
         },
@@ -257,12 +295,19 @@ export const sessionRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { data: session } = await ctx.supabase
         .from("sessions")
-        .select("id, status, startedAt, lastActivityAt, activitySegments, interviewId")
+        .select("id, status, contentPurgedAt, startedAt, lastActivityAt, activitySegments, interviewId")
         .eq("id", input.sessionId)
         .single();
 
       if (!session) {
         throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      if (session.contentPurgedAt) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Session content is no longer available",
+        });
       }
 
       if (
@@ -275,18 +320,28 @@ export const sessionRouter = router({
         });
       }
 
-      const { data: userMessage } = await ctx.supabase
+      await recordPrivacyEvents([
+        { sessionId: input.sessionId, content: input.content },
+      ]);
+      const safeContent = minimizePii(input.content).text;
+      const { data: userMessage, error: insertError } = await ctx.supabase
         .from("messages")
         .insert({
           sessionId: input.sessionId,
           role: "USER" as const,
-          content: input.content,
+          content: safeContent,
           contentType: input.contentType,
           questionId: input.questionId ?? null,
-          wordCount: input.content.split(/\s+/).length,
+          wordCount: safeContent.split(/\s+/).length,
         })
         .select()
         .single();
+      if (insertError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: insertError.message,
+        });
+      }
 
       await ctx.supabase
         .from("sessions")
@@ -309,12 +364,18 @@ export const sessionRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { data: session } = await ctx.supabase
         .from("sessions")
-        .select("id")
+        .select("id, status, contentPurgedAt")
         .eq("id", input.sessionId)
         .single();
 
       if (!session) {
         throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (session.contentPurgedAt || session.status !== "IN_PROGRESS") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Session is no longer available for saving content",
+        });
       }
 
       const { data: existing } = await ctx.supabase
@@ -390,12 +451,18 @@ export const sessionRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { data: session } = await ctx.supabase
         .from("sessions")
-        .select("id")
+        .select("id, status, contentPurgedAt")
         .eq("id", input.sessionId)
         .single();
 
       if (!session) {
         throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (session.contentPurgedAt || session.status !== "IN_PROGRESS") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Session is no longer available for saving content",
+        });
       }
 
       const { data: existing } = await ctx.supabase
@@ -480,12 +547,18 @@ export const sessionRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { data: session } = await ctx.supabase
         .from("sessions")
-        .select("id, startedAt")
+        .select("id, startedAt, contentPurgedAt")
         .eq("id", input.id)
         .single();
 
       if (!session) {
         throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (session.contentPurgedAt) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Session content is no longer available",
+        });
       }
 
       const { data: firstMsg } = await ctx.supabase
@@ -529,12 +602,18 @@ export const sessionRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { data: session } = await ctx.supabase
         .from("sessions")
-        .select("antiCheatingLog")
+        .select("antiCheatingLog, status, contentPurgedAt")
         .eq("id", input.sessionId)
         .single();
 
       if (!session) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
+      }
+      if (session.contentPurgedAt || session.status !== "IN_PROGRESS") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Session is no longer available for monitoring data",
+        });
       }
 
       const log = Array.isArray(session.antiCheatingLog) ? session.antiCheatingLog : [];
@@ -700,6 +779,24 @@ export const sessionRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const { data: session, error: sessionError } = await ctx.supabase
+        .from("sessions")
+        .select("status, contentPurgedAt")
+        .eq("id", input.sessionId)
+        .single();
+      if (sessionError || !session) {
+        throw new TRPCError({
+          code: sessionError?.code === "PGRST116" ? "NOT_FOUND" : "INTERNAL_SERVER_ERROR",
+          message: sessionError?.message ?? "Session not found",
+        });
+      }
+      if (session.contentPurgedAt || session.status !== "IN_PROGRESS") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Session is no longer available for recording data",
+        });
+      }
+
       const updateData: Record<string, unknown> = {};
       if (input.audioRecordingUrl) {
         updateData.audioRecordingUrl = input.audioRecordingUrl;
@@ -733,10 +830,16 @@ export const sessionRouter = router({
   deleteMany: protectedProcedure
     .input(z.object({ ids: z.array(z.string()).min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const { data: sessions } = await ctx.supabase
+      const { data: sessions, error: sessionLookupError } = await ctx.supabase
         .from("sessions")
         .select("id, interview:interviews!inner(projectId, project:projects!inner(organizationId))")
         .in("id", input.ids);
+      if (sessionLookupError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: sessionLookupError.message,
+        });
+      }
 
       await Promise.all(
         (sessions ?? []).map(async (s) => {
@@ -772,7 +875,17 @@ export const sessionRouter = router({
         })
       );
 
-      await ctx.supabase.from("sessions").delete().in("id", input.ids);
+      await removeSessionMedia((sessions ?? []).map((session) => session.id));
+      const { error: deleteError } = await ctx.supabase
+        .from("sessions")
+        .delete()
+        .in("id", input.ids);
+      if (deleteError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: deleteError.message,
+        });
+      }
 
       return { deleted: input.ids.length };
     }),

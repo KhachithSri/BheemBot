@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { sanitizeLLMMessages } from "../sanitize";
 import {
   type LLMProvider,
   type GenerationParams,
@@ -32,9 +33,10 @@ export class XAIProvider implements LLMProvider {
   async generateResponse(
     params: GenerationParams & { model?: string },
   ): Promise<LLMResponse> {
+    const messages = sanitizeLLMMessages(params.messages);
     const response = await this.client.chat.completions.create({
       model: params.model ?? this.defaultModel,
-      messages: this.toOpenAIMessages(params.messages),
+      messages: this.toOpenAIMessages(messages),
       temperature: params.temperature ?? 0.7,
       max_tokens: params.maxTokens ?? 2048,
     });
@@ -56,9 +58,10 @@ export class XAIProvider implements LLMProvider {
   async *streamResponse(
     params: GenerationParams & { model?: string },
   ): AsyncIterable<string> {
+    const messages = sanitizeLLMMessages(params.messages);
     const stream = await this.client.chat.completions.create({
       model: params.model ?? this.defaultModel,
-      messages: this.toOpenAIMessages(params.messages),
+      messages: this.toOpenAIMessages(messages),
       temperature: params.temperature ?? 0.7,
       max_tokens: params.maxTokens ?? 2048,
       stream: true,

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { trpc } from "@/lib/trpc/client";
-import { CheckCircle2, Link2Off, Loader2, Lock, MessageSquare, Mic, Plus, RotateCcw } from "lucide-react";
+import { CheckCircle2, Link2Off, Loader2, Lock, MessageSquare, Mic, Plus, RotateCcw, ShieldCheck } from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -257,6 +257,28 @@ export default function PublicInterviewPage() {
                     <span>This interview uses text chat</span>
                   </>
                 )}
+              </div>
+
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm">
+                <div className="flex items-start gap-2">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="space-y-1 text-muted-foreground">
+                    <p className="font-medium text-foreground">Before you begin</p>
+                    <p>
+                      You will interact with an AI interviewer. Your answers may be
+                      transcribed and analysed to prepare an interview report for
+                      the organisation running this interview.
+                    </p>
+                    {(interview.data.voiceEnabled || interview.data.videoEnabled) && (
+                      <p>
+                        {interview.data.voiceEnabled && "Audio may be recorded for transcription."}
+                        {interview.data.voiceEnabled && interview.data.videoEnabled && " "}
+                        {interview.data.videoEnabled && "Camera or screen capture may be requested."}
+                      </p>
+                    )}
+                    <p>Do not include passwords, payment details, or other unnecessary sensitive information.</p>
+                  </div>
+                </div>
               </div>
 
               <Button

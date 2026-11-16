@@ -188,12 +188,21 @@ CREATE TABLE IF NOT EXISTS sessions (
   "audioRecordingUrl" text,
   screenshots jsonb,
   "audioDuration" real,
+  "contentPurgedAt" timestamptz,
   "antiCheatingLog" jsonb NOT NULL DEFAULT '[]'::jsonb,
   "activitySegments" jsonb NOT NULL DEFAULT '[]'::jsonb,
   "audioRecordings" jsonb NOT NULL DEFAULT '[]'::jsonb,
   "createdAt" timestamptz NOT NULL DEFAULT now(),
   "updatedAt" timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS "contentPurgedAt" timestamptz;
+
+CREATE INDEX IF NOT EXISTS idx_sessions_content_retention
+  ON sessions ("lastActivityAt")
+  WHERE "contentPurgedAt" IS NULL
+    AND status IN ('COMPLETED', 'ABANDONED');
 
 CREATE TABLE IF NOT EXISTS candidates (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -235,6 +244,23 @@ CREATE TABLE IF NOT EXISTS messages (
   "readingTimeSeconds" int,
   "timestamp" timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS privacy_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid REFERENCES sessions(id) ON DELETE CASCADE,
+  message_id uuid REFERENCES messages(id) ON DELETE CASCADE,
+  pii_types text[] NOT NULL DEFAULT '{}',
+  pii_count int NOT NULL DEFAULT 0,
+  original_content text,
+  masked_content text,
+  confidence_threshold float NOT NULL DEFAULT 0.7,
+  timestamp timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb DEFAULT '{}'
+);
+
+UPDATE privacy_events
+SET original_content = NULL
+WHERE original_content IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -388,6 +414,7 @@ ALTER TABLE questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE privacy_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhooks ENABLE ROW LEVEL SECURITY;
@@ -446,6 +473,11 @@ DROP POLICY IF EXISTS "messages_select" ON messages;
 DROP POLICY IF EXISTS "messages_insert" ON messages;
 CREATE POLICY "messages_select" ON messages FOR SELECT USING (true);
 CREATE POLICY "messages_insert" ON messages FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "privacy_events_select" ON privacy_events;
+DROP POLICY IF EXISTS "privacy_events_insert" ON privacy_events;
+CREATE POLICY "privacy_events_select" ON privacy_events FOR SELECT USING (false);
+CREATE POLICY "privacy_events_insert" ON privacy_events FOR INSERT WITH CHECK (false);
 
 DROP POLICY IF EXISTS "api_keys_select" ON api_keys;
 DROP POLICY IF EXISTS "api_keys_insert" ON api_keys;

@@ -1,6 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { removeSessionMedia } from "@/lib/privacy/session-retention";
 import { createClient } from "@/lib/supabase/server";
+import { createLogger } from "@/lib/logger";
 import { NextResponse } from "next/server";
+
+const log = createLogger("api/auth/delete-account");
 
 export async function POST() {
   try {
@@ -14,6 +18,54 @@ export async function POST() {
     }
 
     const userId = user.id;
+
+    const { data: ownedInterviews, error: interviewLookupError } =
+      await supabaseAdmin.from("interviews").select("id").eq("userId", userId);
+    if (interviewLookupError) throw interviewLookupError;
+
+    const { data: ownedOrganizations, error: organizationLookupError } =
+      await supabaseAdmin
+        .from("organizations")
+        .select("id")
+        .eq("ownerId", userId);
+    if (organizationLookupError) throw organizationLookupError;
+
+    const ownedProjectIds: string[] = [];
+    if (ownedOrganizations?.length) {
+      const { data: projects, error: projectLookupError } = await supabaseAdmin
+        .from("projects")
+        .select("id")
+        .in(
+          "organizationId",
+          ownedOrganizations.map((organization) => organization.id),
+        );
+      if (projectLookupError) throw projectLookupError;
+      ownedProjectIds.push(...(projects ?? []).map((project) => project.id));
+    }
+
+    const interviewIds = new Set(
+      (ownedInterviews ?? []).map((interview) => interview.id),
+    );
+    if (ownedProjectIds.length) {
+      const { data: projectInterviews, error: projectInterviewError } =
+        await supabaseAdmin
+          .from("interviews")
+          .select("id")
+          .in("projectId", ownedProjectIds);
+      if (projectInterviewError) throw projectInterviewError;
+      for (const interview of projectInterviews ?? []) {
+        interviewIds.add(interview.id);
+      }
+    }
+
+    if (interviewIds.size) {
+      const { data: sessions, error: sessionLookupError } = await supabaseAdmin
+        .from("sessions")
+        .select("id")
+        .in("interviewId", Array.from(interviewIds));
+      if (sessionLookupError) throw sessionLookupError;
+      await removeSessionMedia((sessions ?? []).map((session) => session.id));
+    }
 
     const cleanupResults = await Promise.all([
       supabaseAdmin.from("interviews").delete().eq("userId", userId),
@@ -42,9 +94,13 @@ export async function POST() {
     }
 
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error) {
+    log.error("Account deletion failed:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      {
+        error:
+          error instanceof Error ? error.message : "Internal server error",
+      },
       { status: 500 },
     );
   }

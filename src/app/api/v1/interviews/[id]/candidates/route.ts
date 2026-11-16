@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import {
+  decryptCandidateData,
+  encryptCandidateData,
+} from "@/lib/privacy/candidate-encryption";
 import { assertInterviewProjectAccess } from "@/app/api/v1/_lib/interview-access";
 import {
     apiError,
@@ -35,9 +40,7 @@ export async function GET(
 
   const { data: candidates, error } = await supabaseAdmin
     .from("candidates")
-    .select(
-      "id, name, email, phone, notes, inviteToken, sessionId, createdAt",
-    )
+    .select("*")
     .eq("interviewId", interviewId)
     .order("createdAt", { ascending: false });
 
@@ -45,7 +48,11 @@ export async function GET(
     return apiError("INTERNAL_ERROR", error.message, 500);
   }
 
-  return Response.json({ data: candidates ?? [] });
+  return Response.json({
+    data: (candidates ?? []).map((candidate) =>
+      decryptCandidateData(candidate),
+    ),
+  });
 }
 
 export async function POST(
@@ -75,14 +82,7 @@ export async function POST(
     return apiError("BAD_REQUEST", "Maximum 500 candidates per request", 400);
   }
 
-  const rows: {
-    interviewId: string;
-    name: string;
-    email: string | null;
-    phone: string | null;
-    notes: string | null;
-    inviteToken: string;
-  }[] = [];
+  const rows: ReturnType<typeof encryptCandidateData>[] = [];
 
   for (const item of rawItems) {
     const c = normalizeCandidateInput(item);
@@ -96,31 +96,40 @@ export async function POST(
     const phone = typeof c.phone === "string" ? c.phone.trim() || null : null;
     const notes = typeof c.notes === "string" ? c.notes.trim() || null : null;
 
-    rows.push({
-      interviewId,
-      name,
-      email: emailRaw || null,
-      phone,
-      notes,
-      inviteToken: nanoid(12),
-    });
+    rows.push(
+      encryptCandidateData(randomUUID(), {
+        name,
+        email: emailRaw || null,
+        phone,
+        gender: null,
+        birthday: null,
+        notes,
+        education: null,
+        school: null,
+        major: null,
+        graduationYear: null,
+        workExperience: null,
+        inviteToken: nanoid(12),
+      }),
+    );
   }
 
   const { data: created, error } = await supabaseAdmin
     .from("candidates")
-    .insert(rows)
-    .select(
-      "id, name, email, phone, notes, inviteToken, sessionId, createdAt, updatedAt",
-    );
+    .insert(rows.map((row) => ({ ...row, interviewId })))
+    .select("*");
 
   if (error) {
     return apiError("INTERNAL_ERROR", error.message, 500);
   }
 
-  const data = (created ?? []).map((row) => ({
-    ...row,
-    inviteUrl: `${APP_BASE}/invite/${row.inviteToken as string}`,
-  }));
+  const data = (created ?? []).map((row) => {
+    const candidate = decryptCandidateData(row);
+    return {
+      ...candidate,
+      inviteUrl: `${APP_BASE}/invite/${candidate.inviteToken}`,
+    };
+  });
 
   return Response.json({ data });
 }

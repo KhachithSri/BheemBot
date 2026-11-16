@@ -283,6 +283,7 @@ export type Database = {
           audioRecordingUrl: string | null;
           audioDuration: number | null;
           screenshots: Json | null;
+          contentPurgedAt: string | null;
           createdAt: string;
           updatedAt: string;
         };
@@ -308,6 +309,7 @@ export type Database = {
           audioRecordingUrl?: string | null;
           audioDuration?: number | null;
           screenshots?: Json | null;
+          contentPurgedAt?: string | null;
           createdAt?: string;
           updatedAt?: string;
         };
@@ -333,6 +335,7 @@ export type Database = {
           audioRecordingUrl?: string | null;
           audioDuration?: number | null;
           screenshots?: Json | null;
+          contentPurgedAt?: string | null;
           createdAt?: string;
           updatedAt?: string;
         };

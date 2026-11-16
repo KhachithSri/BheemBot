@@ -137,7 +137,9 @@ export function RegisterForm() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={8}
+              minLength={12}
+              pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{12,}"
+              title="Use at least 12 characters with uppercase and lowercase letters, a number, and a symbol."
             />
           </div>
           <Button className="w-full" type="submit" disabled={loading}>

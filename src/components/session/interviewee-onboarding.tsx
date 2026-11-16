@@ -1144,6 +1144,30 @@ export function IntervieweeOnboarding({
 
           <Card className="mt-4">
             <CardContent className="space-y-3 p-4 sm:p-6">
+              <h3 className="font-semibold">AI and data use</h3>
+              <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-3 text-sm text-muted-foreground">
+                <p>
+                  This interview is conducted with an AI interviewer. Your answers
+                  may be transcribed and analysed to prepare an interview report for
+                  the organisation running this interview.
+                </p>
+                {(voiceEnabled || antiCheatingEnabled) && (
+                  <p className="mt-2">
+                    {voiceEnabled && "Voice sessions may record audio for transcription. "}
+                    {antiCheatingEnabled && "Integrity checks may record tab, focus, camera, and screen activity."}
+                  </p>
+                )}
+                <p className="mt-2">
+                  Only provide information needed for the interview. Do not include
+                  passwords, payment details, health information, or other sensitive
+                  information unless the interview specifically requires it.
+                </p>
+                <p className="mt-2">
+                  AI output is support for the organisation&apos;s review and should
+                  not be the sole basis for a decision about you.
+                </p>
+              </div>
+
               <h3 className="font-semibold">Integrity Notices</h3>
               {antiCheatingEnabled ? (
                 <>
@@ -1226,7 +1250,7 @@ export function IntervieweeOnboarding({
                 checked={agreed}
                 onCheckedChange={(v) => setAgreed(v === true)}
               />
-              I agree to the above notice and interview guidelines
+              I have read the AI, data-use, and interview notices above
             </label>
             <Button
               disabled={!agreed}

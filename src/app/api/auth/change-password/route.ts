@@ -12,9 +12,19 @@ export async function POST(request: Request) {
       );
     }
 
-    if (newPassword.length < 8) {
+    if (
+      typeof newPassword !== "string" ||
+      newPassword.length < 12 ||
+      !/[a-z]/.test(newPassword) ||
+      !/[A-Z]/.test(newPassword) ||
+      !/[0-9]/.test(newPassword) ||
+      !/[^A-Za-z0-9]/.test(newPassword)
+    ) {
       return NextResponse.json(
-        { error: "Password must be at least 8 characters" },
+        {
+          error:
+            "Password must have at least 12 characters, including uppercase and lowercase letters, a number, and a symbol",
+        },
         { status: 400 },
       );
     }
