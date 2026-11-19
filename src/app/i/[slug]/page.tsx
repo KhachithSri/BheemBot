@@ -1,12 +1,14 @@
 "use client";
 
 import { PreparingScreen } from "@/components/session/preparing-screen";
+import { CandidateResumeUpload } from "@/components/interview/candidate-resume-upload";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { trpc } from "@/lib/trpc/client";
+import type { CandidateQuestionPersonalization } from "@/lib/ai/types";
 import { CheckCircle2, Link2Off, Loader2, Lock, MessageSquare, Mic, Plus, RotateCcw, ShieldCheck } from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -30,6 +32,9 @@ export default function PublicInterviewPage() {
 
   const [participantName, setParticipantName] = useState("");
   const [participantEmail, setParticipantEmail] = useState("");
+  const [personalizedQuestions, setPersonalizedQuestions] =
+    useState<CandidateQuestionPersonalization[] | null>(null);
+  const [resumeProcessing, setResumeProcessing] = useState(false);
   const [completed] = useState(false);
 
   // ── Existing session detection ─────────────────────────────────
@@ -201,6 +206,7 @@ export default function PublicInterviewPage() {
                   interviewSlug: slug,
                   participantName,
                   participantEmail,
+                  personalizedQuestions: personalizedQuestions ?? undefined,
                 });
               }}
               className="space-y-4"
@@ -230,6 +236,12 @@ export default function PublicInterviewPage() {
                   required
                 />
               </div>
+
+              <CandidateResumeUpload
+                interviewSlug={slug}
+                onQuestionsReady={setPersonalizedQuestions}
+                onProcessingChange={setResumeProcessing}
+              />
 
               <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
                 <p>
@@ -287,6 +299,7 @@ export default function PublicInterviewPage() {
                 disabled={
                   !participantName.trim() ||
                   !participantEmail.trim() ||
+                  resumeProcessing ||
                   createSession.isLoading
                 }
               >

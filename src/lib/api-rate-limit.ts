@@ -1,5 +1,5 @@
-const windowMs = 60_000;
-const maxRequests = 60;
+const DEFAULT_WINDOW_MS = 60_000;
+const DEFAULT_MAX_REQUESTS = 60;
 
 const hits = new Map<string, { count: number; resetAt: number }>();
 
@@ -10,7 +10,12 @@ setInterval(() => {
   });
 }, 60_000).unref();
 
-export function checkRateLimit(identifier: string): Response | null {
+export function checkRateLimit(
+  identifier: string,
+  options: { windowMs?: number; maxRequests?: number } = {},
+): Response | null {
+  const windowMs = options.windowMs ?? DEFAULT_WINDOW_MS;
+  const maxRequests = options.maxRequests ?? DEFAULT_MAX_REQUESTS;
   const now = Date.now();
   let entry = hits.get(identifier);
 

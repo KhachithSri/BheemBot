@@ -5,17 +5,14 @@ export function buildGeneratorPrompt(
   durationMinutes?: number,
   language?: string,
   jobDescription?: string,
-  resumeText?: string,
 ): LLMMessage[] {
   const languageInstruction = language && language !== "en"
     ? `\nLANGUAGE: All generated content (title, description, objective, assessment criteria names & descriptions, question texts & descriptions, follow-up prompts, and aiName) MUST be written in ${language}. Only the JSON keys and enum values (e.g. "OPEN_ENDED", "PROFESSIONAL") should remain in English.\n`
     : "";
 
-  const contextInstruction = (jobDescription || resumeText)
+  const contextInstruction = jobDescription
     ? `\nCONTEXT DOCUMENTS:
-${jobDescription ? "- A JOB DESCRIPTION has been provided. Tailor questions to assess the specific skills, qualifications, and responsibilities listed in the JD. Derive assessment criteria from the role requirements." : ""}
-${resumeText ? "- A CANDIDATE RESUME has been provided. Include questions that probe the candidate's claimed experience, validate key skills, and explore any gaps or transitions in their background." : ""}
-${jobDescription && resumeText ? "- When both are provided, focus on the intersection: how well the candidate's experience maps to the role requirements, and probe areas where there may be gaps." : ""}
+- A JOB DESCRIPTION has been provided. Tailor questions to assess the specific skills, qualifications, and responsibilities listed in the JD. Derive assessment criteria from the role requirements.
 `
     : "";
 
@@ -90,7 +87,6 @@ OUTPUT VALID JSON ONLY (no markdown, no explanation):
 
 ${durationMinutes ? `Target duration: approximately ${durationMinutes} minutes.` : ""}
 ${jobDescription ? `\n--- JOB DESCRIPTION ---\n${jobDescription}\n--- END JOB DESCRIPTION ---\n` : ""}
-${resumeText ? `\n--- CANDIDATE RESUME ---\n${resumeText}\n--- END CANDIDATE RESUME ---\n` : ""}
 Please generate the complete interview structure as JSON.`,
     },
   ];
@@ -107,7 +103,6 @@ export function buildImprovePrompt(
   feedback: string,
   language?: string,
   jobDescription?: string,
-  resumeText?: string,
 ): LLMMessage[] {
   const questionsText = currentInterview.questions
     .map((q, i) => `${i + 1}. [${q.type}] ${q.text}`)
@@ -178,7 +173,6 @@ Questions:
 ${questionsText}
 
 ${jobDescription ? `\n--- JOB DESCRIPTION ---\n${jobDescription}\n--- END JOB DESCRIPTION ---\n` : ""}
-${resumeText ? `\n--- CANDIDATE RESUME ---\n${resumeText}\n--- END CANDIDATE RESUME ---\n` : ""}
 User feedback: "${feedback}"
 
 Please improve this interview based on the feedback. Output ONLY valid JSON.`,

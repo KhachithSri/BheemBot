@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { InterviewContext } from "@/hooks/use-voice";
 import { trpc } from "@/lib/trpc/client";
+import { applyQuestionPersonalization } from "@/lib/interview-question-personalization";
 import { CheckCircle2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -97,6 +98,15 @@ export default function SlugSessionPage() {
     );
   }
 
+  const sessionInterview = {
+    ...interview.data,
+    questions: applyQuestionPersonalization(
+      interview.data.questions,
+      (session.data.participantMetadata as { personalizedQuestions?: unknown } | null)
+        ?.personalizedQuestions,
+    ),
+  };
+
   const antiCheatingEnabled = !isPreview && !!interview.data.antiCheatingEnabled;
 
   if (!onboardingDone) {
@@ -104,14 +114,14 @@ export default function SlugSessionPage() {
       <IntervieweeOnboarding
         interviewTitle={interview.data.title}
         interviewDescription={interview.data.description}
-        questionCount={interview.data.questions.length}
+        questionCount={sessionInterview.questions.length}
         timeLimitMinutes={interview.data.timeLimitMinutes}
         language={interview.data.language}
         antiCheatingEnabled={antiCheatingEnabled}
         voiceEnabled={!!interview.data.voiceEnabled}
         chatEnabled={!!interview.data.chatEnabled}
         aiName={interview.data.aiName}
-        questionTypes={interview.data.questions.map((q: any) => q.type as string)}
+        questionTypes={sessionInterview.questions.map((q: any) => q.type as string)}
         onComplete={() => setOnboardingDone(true)}
       />
     );
@@ -122,7 +132,7 @@ export default function SlugSessionPage() {
   const resumeQuestionIndex = (() => {
     const { currentQuestionId } = session.data;
     if (currentQuestionId) {
-      const idx = interview.data.questions.findIndex((q: any) => q.id === currentQuestionId);
+      const idx = sessionInterview.questions.findIndex((q: any) => q.id === currentQuestionId);
       if (idx >= 0) return idx;
     }
     return 0;
@@ -154,7 +164,7 @@ export default function SlugSessionPage() {
       aiTone: "professional",
       language: interview.data.language ?? "en-US",
       followUpDepth: "medium",
-      questions: interview.data.questions.map((q: any, i: number) => ({
+      questions: sessionInterview.questions.map((q: any, i: number) => ({
         text: q.text,
         type: q.type as string,
         order: i,
@@ -170,7 +180,7 @@ export default function SlugSessionPage() {
               interviewId="__preview__"
               interviewTitle={interview.data.title}
               aiName={interview.data.aiName ?? "AI Interviewer"}
-              questionCount={interview.data.questions.length}
+              questionCount={sessionInterview.questions.length}
               interviewContext={mockContext}
               durationMinutes={interview.data.timeLimitMinutes ?? undefined}
               chatEnabled={!!interview.data.chatEnabled}
@@ -211,7 +221,7 @@ export default function SlugSessionPage() {
       language: interview.data.language,
       followUpDepth: interview.data.followUpDepth,
       startQuestionIndex: isResuming ? resumeQuestionIndex : undefined,
-      questions: interview.data.questions.map((q: any) => ({
+      questions: sessionInterview.questions.map((q: any) => ({
         text: q.text,
         type: q.type,
         description: q.description,
@@ -229,7 +239,7 @@ export default function SlugSessionPage() {
           interviewId={interview.data.id}
           interviewTitle={interview.data.title}
           aiName={interview.data.aiName}
-          questionCount={interview.data.questions.length}
+          questionCount={sessionInterview.questions.length}
           interviewContext={interviewContext}
           durationMinutes={interview.data.timeLimitMinutes ?? undefined}
           initialMessages={isResuming ? resumeTextMessages : undefined}
@@ -249,7 +259,7 @@ export default function SlugSessionPage() {
         sessionId={sessionId!}
         interview={{
           ...interview.data,
-          questions: interview.data.questions.map((q: any) => ({
+          questions: sessionInterview.questions.map((q: any) => ({
             ...q,
             starterCode: q.starterCode as { language: string; code: string } | null,
           })),

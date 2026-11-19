@@ -5,6 +5,7 @@ import { buildSummaryPrompt } from "@/lib/ai/prompts/summary";
 import { getProvider, REPORT_MODEL } from "@/lib/ai/registry";
 import { getAuthUser } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { applyQuestionPersonalization } from "@/lib/interview-question-personalization";
 import { NextResponse } from "next/server";
 
 const log = createLogger("api/ai/summarize");
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
     const { data: interviewSession, error: sessionError } = await supabaseAdmin
       .from("sessions")
       .select(
-        `*, interview:interviews!inner(title, userId, projectId, objective, language, assessmentCriteria, questions(text, order, type)), messages(*)`,
+        `*, interview:interviews!inner(title, userId, projectId, objective, language, assessmentCriteria, questions(id, text, order, type)), messages(*)`,
       )
       .eq("id", sessionId)
       .order("order", { referencedTable: "interviews.questions", ascending: true })
@@ -56,8 +57,13 @@ export async function POST(req: Request) {
       objective: string | null;
       language: string;
       assessmentCriteria: { name: string; description: string }[] | null;
-      questions: { text: string; order: number; type?: string }[];
+      questions: { id: string; text: string; order: number; type?: string }[];
     };
+    const reportQuestions = applyQuestionPersonalization(
+      interview.questions ?? [],
+      (interviewSession.participantMetadata as { personalizedQuestions?: unknown } | null)
+        ?.personalizedQuestions,
+    );
 
     const msgs = (interviewSession.messages ?? []) as {
       contentType: string;
@@ -108,7 +114,7 @@ export async function POST(req: Request) {
       textMessages,
       interview.objective,
       criteria,
-      interview.questions,
+      reportQuestions,
       interview.language,
       drawingsInput,
       codeInput,
@@ -139,7 +145,7 @@ export async function POST(req: Request) {
           textMessages,
           interview.objective,
           criteria,
-          interview.questions,
+          reportQuestions,
           interview.language,
           textOnlyDrawings,
           codeInput,

@@ -85,22 +85,19 @@ export function RegisterForm() {
         return;
       }
 
-      // Fallback: if no session returned, sign in explicitly
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      toast({
+        title: t("auth.confirmationSent"),
+        description: `${t("auth.confirmationSentDescription")} ${email}`,
       });
-
-      if (signInError) {
-        toast({
-          title: t("auth.registrationFailed"),
-          description: signInError.message,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      window.location.href = "/dashboard";
+    } catch (error) {
+      toast({
+        title: t("auth.registrationFailed"),
+        description:
+          error instanceof Error
+            ? error.message
+            : "Please check your connection and try again.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -139,8 +136,11 @@ export function RegisterForm() {
               required
               minLength={12}
               pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{12,}"
-              title="Use at least 12 characters with uppercase and lowercase letters, a number, and a symbol."
+              title={t("auth.passwordRequirements")}
             />
+            <p className="text-xs text-muted-foreground">
+              {t("auth.passwordRequirements")}
+            </p>
           </div>
           <Button className="w-full" type="submit" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

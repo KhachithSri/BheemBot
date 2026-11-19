@@ -31,7 +31,6 @@ export async function POST(req: Request) {
     durationMinutes?: unknown;
     language?: unknown;
     jobDescription?: unknown;
-    resumeText?: unknown;
   };
   try {
     body = await req.json();
@@ -39,7 +38,7 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: "Invalid JSON request body" }), { status: 400 });
   }
 
-  const { description, durationMinutes, language, jobDescription, resumeText } = body;
+  const { description, durationMinutes, language, jobDescription } = body;
   if (typeof description !== "string" || !description.trim()) {
     return new Response(JSON.stringify({ error: "Description is required" }), { status: 400 });
   }
@@ -47,16 +46,10 @@ export async function POST(req: Request) {
   if (jobDescription !== undefined && typeof jobDescription !== "string") {
     return new Response(JSON.stringify({ error: "Job description must be text" }), { status: 400 });
   }
-  if (resumeText !== undefined && typeof resumeText !== "string") {
-    return new Response(JSON.stringify({ error: "Resume must be text" }), { status: 400 });
-  }
-
   const piiDetector = new PIIDetector();
   const jobDescriptionText = typeof jobDescription === "string" ? jobDescription : undefined;
-  const resumeTextValue = typeof resumeText === "string" ? resumeText : undefined;
   const filteredDescription = piiDetector.maskPII(description.trim());
   const filteredJobDescription = jobDescriptionText ? piiDetector.maskPII(jobDescriptionText) : jobDescriptionText;
-  const filteredResumeText = resumeTextValue ? piiDetector.maskPII(resumeTextValue) : resumeTextValue;
 
   let provider;
   try {
@@ -73,7 +66,6 @@ export async function POST(req: Request) {
     typeof durationMinutes === "number" ? durationMinutes : undefined,
     typeof language === "string" ? language : undefined,
     filteredJobDescription,
-    filteredResumeText,
   );
 
   const encoder = new TextEncoder();

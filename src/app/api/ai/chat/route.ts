@@ -5,6 +5,7 @@ import { minimizePii } from "@/lib/privacy/minimize";
 import { recordPrivacyEvents } from "@/lib/privacy/privacy-events";
 import type { LLMMessage } from "@/lib/ai/types";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { applyQuestionPersonalization } from "@/lib/interview-question-personalization";
 import { NextResponse } from "next/server";
 
 const log = createLogger("api/ai/chat");
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
 
     const { data: session, error: sessionError } = await supabaseAdmin
       .from("sessions")
-      .select("status, contentPurgedAt")
+      .select("status, contentPurgedAt, participantMetadata")
       .eq("id", sessionId)
       .single();
     if (sessionError) {
@@ -52,6 +53,14 @@ export async function POST(req: Request) {
         { status: 404 },
       );
     }
+
+    const personalizedQuestions = (
+      session.participantMetadata as { personalizedQuestions?: unknown } | null
+    )?.personalizedQuestions;
+    interview.questions = applyQuestionPersonalization(
+      interview.questions ?? [],
+      personalizedQuestions,
+    );
 
     const provider = getProvider(interview.llmProvider);
 

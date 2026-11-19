@@ -43,6 +43,9 @@ export class GroqProvider implements LLMProvider {
       messages: this.toOpenAIMessages(messages),
       temperature: params.temperature ?? 0.7,
       max_tokens: params.maxTokens ?? 2048,
+      ...(params.responseFormat
+        ? { response_format: params.responseFormat }
+        : {}),
     });
 
     const choice = response.choices[0];
@@ -69,6 +72,9 @@ export class GroqProvider implements LLMProvider {
       messages: this.toOpenAIMessages(messages),
       temperature: params.temperature ?? 0.7,
       max_tokens: params.maxTokens ?? 2048,
+      ...(params.responseFormat
+        ? { response_format: params.responseFormat }
+        : {}),
       stream: true,
     });
 

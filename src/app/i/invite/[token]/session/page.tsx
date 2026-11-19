@@ -8,6 +8,7 @@ import { PreparingScreen } from "@/components/session/preparing-screen";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc/client";
+import { applyQuestionPersonalization } from "@/lib/interview-question-personalization";
 import { CheckCircle2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
@@ -58,11 +59,19 @@ export default function InviteSessionPage() {
   }
 
   const session = (candidate.data as any).session;
-  const interview = (candidate.data as any).interview;
+  const interviewData = (candidate.data as any).interview;
 
   if (!session) {
     return <PreparingScreen />;
   }
+
+  const interview = {
+    ...interviewData,
+    questions: applyQuestionPersonalization(
+      interviewData.questions ?? [],
+      session.participantMetadata?.personalizedQuestions,
+    ),
+  };
 
   if (completed || session.status === "COMPLETED") {
     return (

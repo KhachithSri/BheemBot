@@ -6,6 +6,7 @@ import { createLogger } from "@/lib/logger";
 import { minimizePii } from "@/lib/privacy/minimize";
 import { recordPrivacyEvents } from "@/lib/privacy/privacy-events";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { applyQuestionPersonalization } from "@/lib/interview-question-personalization";
 import { NextResponse } from "next/server";
 import { handleVoiceSave, type CompletionSession, type ProgressSession, type VoiceSaveOps, type VoiceSavePayload } from "./logic";
 
@@ -52,7 +53,7 @@ const voiceSaveOps: VoiceSaveOps = {
     const { data } = await supabaseAdmin
       .from("sessions")
       .select(
-        `*, interview:interviews!inner(title, objective, language, userId, projectId, assessmentCriteria, questions(text, order, type))`,
+        `*, interview:interviews!inner(title, objective, language, userId, projectId, assessmentCriteria, questions(id, text, order, type))`,
       )
       .eq("id", sessionId)
       .order("order", {
@@ -60,6 +61,14 @@ const voiceSaveOps: VoiceSaveOps = {
         ascending: true,
       })
       .single();
+
+    if (data?.interview) {
+      data.interview.questions = applyQuestionPersonalization(
+        data.interview.questions ?? [],
+        (data.participantMetadata as { personalizedQuestions?: unknown } | null)
+          ?.personalizedQuestions,
+      );
+    }
 
     return (data as CompletionSession | null) ?? null;
   },

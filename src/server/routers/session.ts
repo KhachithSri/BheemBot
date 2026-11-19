@@ -7,11 +7,73 @@ import {
 import { minimizePii } from "@/lib/privacy/minimize";
 import { recordPrivacyEvents } from "@/lib/privacy/privacy-events";
 import { removeSessionMedia } from "@/lib/privacy/session-retention";
+import type { CandidateQuestionPersonalization } from "@/lib/ai/types";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { filterAccessibleProjectIds, hasProjectAccess, protectedProcedure, publicProcedure, router } from "../trpc";
+import { filterAccessibleProjectIds, getOrgMembership, hasProjectAccess, protectedProcedure, publicProcedure, router } from "../trpc";
 
 const log = createLogger("router/session");
+
+function validatePersonalizedQuestions(
+  interviewQuestions: { id: string; order: number }[],
+  personalizedQuestions: CandidateQuestionPersonalization[] | undefined,
+): CandidateQuestionPersonalization[] | undefined {
+  if (!personalizedQuestions) return undefined;
+  const sortedQuestions = [...interviewQuestions].sort((a, b) => a.order - b.order);
+  if (personalizedQuestions.length !== sortedQuestions.length) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Personalized questions must match the interview script.",
+    });
+  }
+
+  const updates = new Map<string, CandidateQuestionPersonalization>();
+  for (const question of personalizedQuestions) {
+    if (updates.has(question.id)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Duplicate personalized question." });
+    }
+    updates.set(question.id, question);
+  }
+
+  return sortedQuestions.map((question) => {
+    const update = updates.get(question.id);
+    if (
+      !update ||
+      !update.text.trim() ||
+      update.text.length > 2000 ||
+      (update.description !== null && update.description.length > 2000)
+    ) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Personalized questions must match the interview script.",
+      });
+    }
+    return {
+      id: question.id,
+      text: update.text.trim(),
+      description: update.description?.trim() || null,
+    };
+  });
+}
+
+async function savePersonalizedQuestions(
+  supabase: Parameters<typeof getOrgMembership>[0],
+  sessionId: string,
+  questions: CandidateQuestionPersonalization[] | undefined,
+) {
+  if (!questions) return;
+  const { error } = await supabase
+    .from("sessions")
+    .update({ participantMetadata: { personalizedQuestions: questions } })
+    .eq("id", sessionId);
+  if (error) {
+    log.error("Failed to save candidate-specific questions:", error);
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Could not save personalized interview questions.",
+    });
+  }
+}
 
 export const sessionRouter = router({
   create: publicProcedure
@@ -20,6 +82,11 @@ export const sessionRouter = router({
         interviewSlug: z.string(),
         participantName: z.string().optional(),
         participantEmail: z.string().email().optional(),
+        personalizedQuestions: z.array(z.object({
+          id: z.string(),
+          text: z.string().min(1).max(2000),
+          description: z.string().max(2000).nullable(),
+        })).max(100).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -73,7 +140,11 @@ export const sessionRouter = router({
         invitedCandidateId = invitedCandidate.id;
       }
 
-      const questions = (interview.questions ?? []) as { id: string }[];
+      const questions = (interview.questions ?? []) as { id: string; order: number }[];
+      const personalizedQuestions = validatePersonalizedQuestions(
+        questions,
+        input.personalizedQuestions,
+      );
 
       const derivedMode = interview.voiceEnabled ? "VOICE" : "CHAT";
       if (interview.requireInvite && !invitedCandidateId) {
@@ -106,6 +177,11 @@ export const sessionRouter = router({
       }
 
       const session = sessionJson as { id: string };
+      await savePersonalizedQuestions(
+        ctx.supabase,
+        session.id,
+        personalizedQuestions,
+      );
 
       return { sessionId: session.id, interview };
     }),
@@ -191,7 +267,14 @@ export const sessionRouter = router({
     }),
 
   createFromInvite: publicProcedure
-    .input(z.object({ inviteToken: z.string() }))
+    .input(z.object({
+      inviteToken: z.string(),
+      personalizedQuestions: z.array(z.object({
+        id: z.string(),
+        text: z.string().min(1).max(2000),
+        description: z.string().max(2000).nullable(),
+      })).max(100).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       // Look up candidate + interview via the RPC
       const { data: hashedCandidate } = await ctx.supabase
@@ -236,6 +319,10 @@ export const sessionRouter = router({
       // Sort questions
       const questions = (interview.questions ?? []) as { id: string; order: number }[];
       questions.sort((a, b) => a.order - b.order);
+      const personalizedQuestions = validatePersonalizedQuestions(
+        questions,
+        input.personalizedQuestions,
+      );
 
       // Create session via RPC (also links it to the candidate)
       const derivedMode = interview.voiceEnabled ? "VOICE" : "CHAT";
@@ -255,6 +342,11 @@ export const sessionRouter = router({
       }
 
       const session = sessionJson as { id: string };
+      await savePersonalizedQuestions(
+        ctx.supabase,
+        session.id,
+        personalizedQuestions,
+      );
       return { sessionId: session.id, interview, isExisting: false };
     }),
 

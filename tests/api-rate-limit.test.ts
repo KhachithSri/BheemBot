@@ -34,6 +34,15 @@ describe("checkRateLimit", () => {
     assert.equal(blocked.status, 429);
   });
 
+  it("supports stricter endpoint-specific limits", async () => {
+    const { checkRateLimit } = await importFreshRateLimiter();
+    const options = { windowMs: 10 * 60_000, maxRequests: 1 };
+    assert.equal(checkRateLimit("custom-limit", options), null);
+    const blocked = checkRateLimit("custom-limit", options);
+    assert.ok(blocked instanceof Response);
+    assert.equal(blocked.headers.get("X-RateLimit-Limit"), "1");
+  });
+
   it("includes Retry-After and X-RateLimit-* headers on 429 responses", async () => {
     const { checkRateLimit } = await importFreshRateLimiter();
     for (let i = 0; i < 60; i++) {

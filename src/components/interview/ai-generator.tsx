@@ -49,12 +49,6 @@ import { AI_TONES, FOLLOW_UP_DEPTHS, LANGUAGES } from "@/lib/constants";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
     Popover,
     PopoverContent,
     PopoverTrigger,
@@ -285,7 +279,7 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
   const [editingCriterionIndex, setEditingCriterionIndex] = useState<number | null>(null);
   const criterionSnapshotRef = useRef<AssessmentCriterion | null>(null);
 
-  // Context documents (JD / Resume)
+  // Job description context
   const [jdText, setJdText] = useState("");
   const [jdSource, setJdSource] = useState("");
   const [jdLoading, setJdLoading] = useState(false);
@@ -293,11 +287,6 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
   const [jdUrlInput, setJdUrlInput] = useState("");
   const [jdPopoverOpen, setJdPopoverOpen] = useState(false);
   const jdFileRef = useRef<HTMLInputElement>(null);
-  const [resumeText, setResumeText] = useState("");
-  const [resumeSource, setResumeSource] = useState("");
-  const [resumeLoading, setResumeLoading] = useState(false);
-  const [resumeError, setResumeError] = useState("");
-  const resumeFileRef = useRef<HTMLInputElement>(null);
 
   // AI feedback refinement
   const [feedback, setFeedback] = useState("");
@@ -406,23 +395,6 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
     }
   }, [jdUrlInput, extractText]);
 
-  const handleResumeFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setResumeLoading(true);
-    setResumeError("");
-    try {
-      const text = await extractText({ file });
-      setResumeText(text);
-      setResumeSource(file.name);
-    } catch (err) {
-      setResumeError(err instanceof Error ? err.message : "Failed to extract text");
-    } finally {
-      setResumeLoading(false);
-      if (resumeFileRef.current) resumeFileRef.current.value = "";
-    }
-  }, [extractText]);
-
   const handleGenerate = async () => {
     if (!description.trim()) return;
 
@@ -448,7 +420,6 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
           organizationId: currentOrg?.id,
           projectId,
           ...(jdText && { jobDescription: jdText }),
-          ...(resumeText && { resumeText }),
         }),
       });
 
@@ -500,7 +471,6 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
           organizationId: currentOrg?.id,
           projectId,
           ...(jdText && { jobDescription: jdText }),
-          ...(resumeText && { resumeText }),
         }),
       });
 
@@ -693,10 +663,9 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
                   <div className="rounded-md border bg-background focus-within:border-ring transition-colors">
                     {/* Hidden file inputs */}
                     <input ref={jdFileRef} type="file" accept=".pdf" className="hidden" onChange={handleJdFile} />
-                    <input ref={resumeFileRef} type="file" accept=".pdf" className="hidden" onChange={handleResumeFile} />
 
                     {/* Attached files at the top */}
-                    {(jdText || resumeText || jdLoading || resumeLoading || jdError || resumeError) && (
+                    {(jdText || jdLoading || jdError) && (
                       <div className="flex flex-wrap items-center gap-2 px-3 pt-2.5 pb-1">
                         {jdLoading && (
                           <span className="inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground">
@@ -719,26 +688,6 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
                         )}
                         {jdError && <span className="text-xs text-destructive">{jdError}</span>}
 
-                        {resumeLoading && (
-                          <span className="inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            Extracting resume...
-                          </span>
-                        )}
-                        {resumeText && (
-                          <span className="inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground">
-                            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span className="max-w-[180px] truncate">{resumeSource}</span>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                              onClick={() => { setResumeText(""); setResumeSource(""); setResumeError(""); }}
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </span>
-                        )}
-                        {resumeError && <span className="text-xs text-destructive">{resumeError}</span>}
                       </div>
                     )}
 
@@ -781,7 +730,7 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
                       )}
                     </div>
 
-                    {/* Bottom toolbar: JD & Resume buttons (right-aligned) */}
+                    {/* Bottom toolbar: JD button */}
                     <div className="flex items-center justify-end gap-1.5 px-3 pb-2">
                       {/* JD button */}
                       <Popover open={jdPopoverOpen} onOpenChange={(open) => { setJdPopoverOpen(open); if (!open) setJdUrlInput(""); }}>
@@ -850,36 +799,6 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
                         </PopoverContent>
                       </Popover>
 
-                      {/* Resume button */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-                              resumeText
-                                ? "bg-primary/10 text-primary"
-                                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                            )}
-                          >
-                            {resumeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                            Resume
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
-                          {resumeText ? (
-                            <DropdownMenuItem onClick={() => { setResumeText(""); setResumeSource(""); setResumeError(""); }}>
-                              <X className="mr-2 h-4 w-4" />
-                              Remove Resume
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem onClick={() => resumeFileRef.current?.click()}>
-                              <FileText className="mr-2 h-4 w-4" />
-                              Upload PDF
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
                     </div>
 
                   </div>

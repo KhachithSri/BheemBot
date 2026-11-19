@@ -17,6 +17,9 @@ export const creatingInterviewsArticles: DocArticle[] = [
         <p>
           Describe what you want to assess in natural language — the role, skills, duration, and any constraints. The AI generates a complete interview with questions, types, and assessment criteria.
         </p>
+        <p>
+          You can attach a job description to guide the generated questions. Candidates may optionally upload their own resume from the interview link, which personalizes that candidate&apos;s questions without changing the recruiter&apos;s interview.
+        </p>
 
         <DocImage src="/images/docs/interview-new-ai.webp" alt="AI Generator tab with goal description, template chips, and configuration" />
 

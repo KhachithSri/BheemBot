@@ -12,6 +12,7 @@ export interface GenerationParams {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  responseFormat?: { type: "json_object" };
 }
 
 export interface LLMResponse {
@@ -69,4 +70,10 @@ export interface GeneratedQuestion {
   followUpPrompts?: string[];
   /** Starter code template for CODING questions. */
   starterCode?: { language: string; code: string };
+}
+
+export interface CandidateQuestionPersonalization {
+  id: string;
+  text: string;
+  description: string | null;
 }

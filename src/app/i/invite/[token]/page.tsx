@@ -1,19 +1,32 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { CandidateResumeUpload } from "@/components/interview/candidate-resume-upload";
 import { Link2Off, CheckCircle2 } from "lucide-react";
 import { PreparingScreen } from "@/components/session/preparing-screen";
+import { useToast } from "@/hooks/use-toast";
+import type { CandidateQuestionPersonalization } from "@/lib/ai/types";
 
 export default function InvitePage() {
   const params = useParams();
   const token = params.token as string;
   const router = useRouter();
+  const { toast } = useToast();
 
   const [completed, setCompleted] = useState(false);
-  const sessionCreationAttempted = useRef(false);
+  const [personalizedQuestions, setPersonalizedQuestions] =
+    useState<CandidateQuestionPersonalization[] | null>(null);
+  const [resumeProcessing, setResumeProcessing] = useState(false);
 
   const candidate = trpc.candidate.getByToken.useQuery(
     { token },
@@ -23,6 +36,13 @@ export default function InvitePage() {
   const createSession = trpc.session.createFromInvite.useMutation({
     onSuccess: () => {
       goToSession();
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to start interview",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -50,11 +70,7 @@ export default function InvitePage() {
       return;
     }
 
-    if (!sessionCreationAttempted.current) {
-      sessionCreationAttempted.current = true;
-      createSession.mutate({ inviteToken: token });
-    }
-  }, [candidate.data, completed, createSession, token, goToSession]);
+  }, [candidate.data, completed, goToSession]);
 
   // Loading
   if (candidate.isLoading) {
@@ -98,6 +114,46 @@ export default function InvitePage() {
     );
   }
 
-  // Creating session
-  return <PreparingScreen />;
+  const interview = candidate.data.interview as {
+    title: string;
+    description: string | null;
+    publicSlug: string;
+    questions: { id: string }[];
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="font-heading text-2xl">{interview.title}</CardTitle>
+          <CardDescription>
+            {interview.description || "You have been invited to complete this interview."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
+            {interview.questions.length} questions
+          </p>
+          <CandidateResumeUpload
+            interviewSlug={interview.publicSlug}
+            inviteToken={token}
+            onQuestionsReady={setPersonalizedQuestions}
+            onProcessingChange={setResumeProcessing}
+          />
+          <Button
+            className="w-full"
+            disabled={resumeProcessing || createSession.isLoading}
+            onClick={() => {
+              createSession.mutate({
+                inviteToken: token,
+                personalizedQuestions: personalizedQuestions ?? undefined,
+              });
+            }}
+          >
+            Start Interview
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
