@@ -1200,8 +1200,8 @@ export function VoiceInterface({
       try {
         // Stop recording and save artifacts (video mode)
         if (videoMode && recording.isRecording) {
-          const result = await withTimeout(recording.stop(), 8000, "stop recording");
-          await withTimeout(
+          const result = await withTimeout(recording.stop(), 30000, "stop recording");
+          const saveResponse = await withTimeout(
             fetch("/api/trpc/session.saveRecording", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1217,6 +1217,9 @@ export function VoiceInterface({
             8000,
             "save recording",
           );
+          if (!saveResponse.ok) {
+            throw new Error(`Saving recording metadata failed (${saveResponse.status})`);
+          }
         }
       } catch (err) {
         console.error("[voice] Failed to save recording:", err);

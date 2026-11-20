@@ -865,6 +865,7 @@ export const sessionRouter = router({
               path: z.string(),
               timestamp: z.string(),
               type: z.enum(["camera", "screen"]),
+              faceMatch: z.enum(["similar", "changed"]).optional(),
             }),
           )
           .optional(),

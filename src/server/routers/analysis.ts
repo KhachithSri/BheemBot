@@ -8,6 +8,7 @@ interface ScreenshotEntry {
   path: string;
   timestamp: string;
   type: "camera" | "screen";
+  faceMatch?: "similar" | "changed";
 }
 
 async function resolveSignedUrl(bucket: string, path: string): Promise<string | null> {

@@ -2,6 +2,11 @@
 
 import { createLogger } from "@/lib/logger";
 import {
+  createLocalFaceCaptureProcessor,
+  type LocalFaceCaptureProcessor,
+} from "@/lib/privacy/local-face-analysis";
+import type { FaceMatchStatus } from "@/lib/privacy/face-matching";
+import {
     getStoredCameraStream,
     getStoredScreenStream,
     setStoredCameraStream,
@@ -19,6 +24,7 @@ export interface ScreenshotEntry {
   path: string;
   timestamp: string;
   type: "camera" | "screen";
+  faceMatch?: FaceMatchStatus;
 }
 
 interface UseInterviewRecordingOptions {
@@ -103,6 +109,10 @@ export function useInterviewRecording({
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const screenshotTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const screenshotsRef = useRef<ScreenshotEntry[]>([]);
+  const cameraCaptureQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const faceProcessorRef = useRef<
+    Promise<LocalFaceCaptureProcessor | null> | null
+  >(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -218,68 +228,155 @@ export function useInterviewRecording({
     ttsPlayTimeRef.current = 0;
   }, []);
 
-  /** Capture a screenshot from a video element and upload it. */
+  /** Process and upload a screenshot; camera images are never uploaded raw. */
   const captureAndUpload = useCallback(
     async (video: HTMLVideoElement, type: "camera" | "screen") => {
-      if (video.readyState < 2 || video.videoWidth === 0) return;
+      const capture = async () => {
+        if (video.readyState < 2 || video.videoWidth === 0) return;
 
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx2d = canvas.getContext("2d");
-      if (!ctx2d) return;
+        const timestamp = new Date().toISOString();
+        let blob: Blob | null = null;
+        let faceMatch: FaceMatchStatus | undefined;
 
-      if (type === "camera") {
-        ctx2d.translate(canvas.width, 0);
-        ctx2d.scale(-1, 1);
-      }
-      ctx2d.drawImage(video, 0, 0);
+        if (type === "camera") {
+          try {
+            const processor = await faceProcessorRef.current;
+            if (!processor) {
+              throw new Error("Local face analysis is unavailable");
+            }
+            const processed = await processor.process(video);
+            blob = processed.blob;
+            faceMatch = processed.faceMatch;
+          } catch (err) {
+            log.error("Local camera privacy processing failed:", err);
+            screenshotsRef.current.push({
+              url: "",
+              path: "",
+              timestamp,
+              type,
+              faceMatch: "changed",
+            });
+            return;
+          }
 
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob((b) => resolve(b), "image/jpeg", 0.7),
-      );
-      if (!blob) return;
+          if (!blob) {
+            screenshotsRef.current.push({
+              url: "",
+              path: "",
+              timestamp,
+              type,
+              faceMatch: "changed",
+            });
+            log.warn("Camera capture withheld because no safe face image was produced");
+            return;
+          }
+        } else {
+          const canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const context = canvas.getContext("2d");
+          if (!context) {
+            log.error("Could not create screen capture canvas");
+            return;
+          }
+          context.drawImage(video, 0, 0);
+          blob = await new Promise<Blob | null>((resolve) =>
+            canvas.toBlob((value) => resolve(value), "image/jpeg", 0.7),
+          );
+          canvas.width = 0;
+          canvas.height = 0;
+          if (!blob) {
+            log.error("Could not encode screen capture");
+            return;
+          }
+        }
 
-      const timestamp = new Date().toISOString();
-      const filename = `${timestamp.replace(/[:.]/g, "-")}-${type}.jpg`;
+        const filename = `${timestamp.replace(/[:.]/g, "-")}-${type}.jpg`;
+        try {
+          const form = new FormData();
+          form.append("file", blob, filename);
+          form.append("sessionId", sessionId);
+          form.append("type", "screenshot");
+          form.append("filename", filename);
 
-      try {
-        const form = new FormData();
-        form.append("file", blob, filename);
-        form.append("sessionId", sessionId);
-        form.append("type", "screenshot");
-        form.append("filename", filename);
+          const res = await fetch("/api/session/upload", {
+            method: "POST",
+            body: form,
+          });
+          if (!res.ok) {
+            log.error("Screenshot upload failed:", type, res.status);
+            if (type === "camera") {
+              screenshotsRef.current.push({
+                url: "",
+                path: "",
+                timestamp,
+                type,
+                faceMatch: faceMatch ?? "changed",
+              });
+            }
+            return;
+          }
 
-        const res = await fetch("/api/session/upload", {
-          method: "POST",
-          body: form,
-        });
-
-        if (res.ok) {
           const data = await res.json();
+          if (typeof data.url !== "string" || typeof data.path !== "string") {
+            throw new Error("Screenshot upload returned invalid metadata");
+          }
           screenshotsRef.current.push({
             url: data.url,
             path: data.path,
             timestamp,
             type,
+            ...(faceMatch ? { faceMatch } : {}),
           });
           log.info(`Screenshot uploaded: ${type}`);
+        } catch (err) {
+          log.error("Screenshot upload failed:", err);
+          if (type === "camera") {
+            screenshotsRef.current.push({
+              url: "",
+              path: "",
+              timestamp,
+              type,
+              faceMatch: faceMatch ?? "changed",
+            });
+          }
         }
-      } catch (err) {
-        log.error("Screenshot upload failed:", err);
+      };
+
+      if (type === "camera") {
+        const queuedCapture = cameraCaptureQueueRef.current.then(capture, capture);
+        cameraCaptureQueueRef.current = queuedCapture.catch((err) => {
+          log.error("Camera capture queue failed:", err);
+        });
+        try {
+          await queuedCapture;
+        } catch (err) {
+          log.error("Camera capture failed before privacy processing completed:", err);
+          screenshotsRef.current.push({
+            url: "",
+            path: "",
+            timestamp: new Date().toISOString(),
+            type,
+            faceMatch: "changed",
+          });
+        }
+      } else {
+        await capture();
       }
     },
     [sessionId],
   );
 
   /** Take screenshots from both camera and screen streams. */
-  const takeScreenshots = useCallback(() => {
+  const takeScreenshots = useCallback(async () => {
+    const captures: Promise<void>[] = [];
     if (cameraVideoRef.current && cameraStreamRef.current) {
-      captureAndUpload(cameraVideoRef.current, "camera");
+      captures.push(captureAndUpload(cameraVideoRef.current, "camera"));
     }
     if (screenVideoRef.current && screenStreamRef.current) {
-      captureAndUpload(screenVideoRef.current, "screen");
+      captures.push(captureAndUpload(screenVideoRef.current, "screen"));
     }
+    await Promise.all(captures);
   }, [captureAndUpload]);
 
   /** Start recording audio and periodic screenshots. */
@@ -288,6 +385,8 @@ export function useInterviewRecording({
       if (!enabled || isRecording) return;
       stoppedRef.current = false;
       ttsPlayTimeRef.current = 0;
+      screenshotsRef.current = [];
+      cameraCaptureQueueRef.current = Promise.resolve();
 
       // Create mixing AudioContext and destination
       const ctx = new AudioContext();
@@ -317,6 +416,12 @@ export function useInterviewRecording({
 
       // Acquire camera + screen
       await acquireStreams();
+      faceProcessorRef.current = cameraStreamRef.current
+        ? createLocalFaceCaptureProcessor().catch((err) => {
+            log.error("Could not initialize local face analysis:", err);
+            return null;
+          })
+        : Promise.resolve(null);
 
       // Set up hidden video elements for screenshot capture
       if (!cameraVideoRef.current) {
@@ -351,7 +456,11 @@ export function useInterviewRecording({
       }, 500);
 
       // Start periodic screenshot timer
-      screenshotTimerRef.current = setInterval(takeScreenshots, screenshotIntervalMs);
+      screenshotTimerRef.current = setInterval(() => {
+        void takeScreenshots().catch((err) => {
+          log.error("Periodic screenshot capture failed:", err);
+        });
+      }, screenshotIntervalMs);
 
       setIsRecording(true);
       log.info("Started");
@@ -380,7 +489,21 @@ export function useInterviewRecording({
     }
 
     // Take one final set of screenshots
-    takeScreenshots();
+    try {
+      await takeScreenshots();
+      await cameraCaptureQueueRef.current;
+    } catch (err) {
+      log.error("Final screenshot capture failed:", err);
+    }
+
+    const faceProcessor = await faceProcessorRef.current;
+    try {
+      await faceProcessor?.dispose();
+    } catch (err) {
+      log.error("Face processor disposal failed:", err);
+    } finally {
+      faceProcessorRef.current = null;
+    }
 
     // Stop MediaRecorder and collect audio
     let audioUrl: string | undefined;
@@ -474,6 +597,13 @@ export function useInterviewRecording({
       try { mixCtxRef.current?.close(); } catch { /* noop */ }
       cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+      void cameraCaptureQueueRef.current
+        .then(async () => {
+          const processor = await faceProcessorRef.current;
+          await processor?.dispose();
+          faceProcessorRef.current = null;
+        })
+        .catch((err) => log.error("Face processor cleanup failed:", err));
       if (cameraVideoRef.current) { cameraVideoRef.current.remove(); cameraVideoRef.current = null; }
       if (screenVideoRef.current) { screenVideoRef.current.remove(); screenVideoRef.current = null; }
     };

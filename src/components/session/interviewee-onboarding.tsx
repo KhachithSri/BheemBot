@@ -1204,9 +1204,10 @@ export function IntervieweeOnboarding({
                       Please unplug or turn off additional screens before starting.
                     </li>
                     <li>
-                      This interview requires a camera to collect your registration
-                      photo and capture your behavior. All photos are privacy
-                      protected.
+                      If camera captures are enabled, frames are analyzed on this
+                      device for face consistency. Faces are blurred before camera
+                      screenshots are stored. Comparison results may be flagged
+                      for human review and are not proof of identity change.
                     </li>
                     <li>
                       The interview will screen capture throughout. Screen capture
@@ -1231,9 +1232,10 @@ export function IntervieweeOnboarding({
                     interview page during the whole process.
                   </li>
                   <li>
-                    This interview requires a camera to collect your registration
-                    photo and capture your behavior. All photos are privacy
-                    protected.
+                    If camera captures are enabled, frames are analyzed on this
+                    device for face consistency. Faces are blurred before camera
+                    screenshots are stored. Comparison results may be flagged
+                    for human review and are not proof of identity change.
                   </li>
                   <li>
                     The interview will screen capture throughout. Screen capture

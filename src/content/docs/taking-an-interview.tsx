@@ -84,6 +84,12 @@ export const takingAnInterviewArticles: DocArticle[] = [
         <p>
           Some interviews record your camera and/or screen. Position your camera so your face is clearly visible with good lighting.
         </p>
+        <p>
+          When camera screenshots are collected, face matching runs locally in
+          your browser. Faces are blurred before camera screenshots are stored.
+          A mismatch or failed comparison may be shown in the session report for
+          human review; it is not proof of an identity change.
+        </p>
 
         <hr />
 

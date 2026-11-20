@@ -70,6 +70,14 @@ interface ResearchFinding {
   dataPoints?: string[];
 }
 
+interface ScreenshotSummary {
+  url: string;
+  path: string;
+  timestamp: string;
+  type: "camera" | "screen";
+  faceMatch?: "similar" | "changed";
+}
+
 export function InterviewResults({
   interviewId,
   initialSessionId,
@@ -506,15 +514,10 @@ function SessionDetail({
             {/* Report header */}
             {(() => {
               const screenshots = summary.data?.screenshots as
-                | {
-                    url: string;
-                    path: string;
-                    timestamp: string;
-                    type: "camera" | "screen";
-                  }[]
+                | ScreenshotSummary[]
                 | null;
               const avatarUrl =
-                screenshots?.find((s) => s.type === "camera")?.url ?? null;
+                screenshots?.find((s) => s.type === "camera" && s.url)?.url ?? null;
               const participantName =
                 summary.data?.participantName ||
                 summary.data?.participantEmail ||
@@ -1214,12 +1217,7 @@ function SessionDetail({
             {/* Screenshots */}
             {(() => {
               const screenshots = summary.data?.screenshots as
-                | {
-                    url: string;
-                    path: string;
-                    timestamp: string;
-                    type: "camera" | "screen";
-                  }[]
+                | ScreenshotSummary[]
                 | null;
               if (!screenshots || screenshots.length === 0) return null;
               const cameraShots = screenshots.filter(
@@ -1227,6 +1225,12 @@ function SessionDetail({
               );
               const screenShots = screenshots.filter(
                 (s) => s.type === "screen",
+              );
+              const analyzedCameraShots = cameraShots.filter(
+                (s) => s.faceMatch !== undefined,
+              );
+              const changedCameraShots = analyzedCameraShots.filter(
+                (s) => s.faceMatch === "changed",
               );
               return (
                 <Card>
@@ -1241,6 +1245,35 @@ function SessionDetail({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    {analyzedCameraShots.length > 0 && (
+                      <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-medium">
+                            Face consistency
+                          </p>
+                          <Badge variant="outline">
+                            {changedCameraShots.length > 0
+                              ? "Not all faces similar"
+                              : "All captured faces similar"}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Camera captures are compared on the participant&apos;s
+                          device. Review this result as a signal, not proof of
+                          identity change.
+                        </p>
+                        {changedCameraShots.length > 0 && (
+                          <ul className="space-y-1 text-xs text-muted-foreground">
+                            {changedCameraShots.map((shot, i) => (
+                              <li key={`${shot.timestamp}-${i}`}>
+                                {new Date(shot.timestamp).toLocaleTimeString()}
+                                {!shot.url && " — image withheld because it could not be safely processed"}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
                     {cameraShots.length > 0 && (
                       <div>
                         <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
@@ -1248,35 +1281,53 @@ function SessionDetail({
                           Camera
                         </p>
                         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
-                          {cameraShots.map((shot, i) => (
-                            <button
-                              key={i}
-                              type="button"
-                              className="group overflow-hidden rounded-lg border bg-card p-1 text-left transition-shadow hover:shadow-md hover:ring-1 hover:ring-primary/30"
-                              onClick={() =>
-                                setLightboxImg({
-                                  src: shot.url,
-                                  alt: `Camera screenshot at ${new Date(shot.timestamp).toLocaleTimeString()}`,
-                                })
-                              }
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={shot.url}
-                                alt={`Camera at ${new Date(shot.timestamp).toLocaleTimeString()}`}
-                                className="h-24 w-full rounded object-cover"
-                              />
-                              <p className="mt-0.5 text-center text-[10px] text-muted-foreground/60">
-                                {new Date(shot.timestamp).toLocaleTimeString(
-                                  undefined,
-                                  {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  },
-                                )}
-                              </p>
-                            </button>
-                          ))}
+                          {cameraShots.map((shot, i) =>
+                            shot.url ? (
+                              <button
+                                key={`${shot.timestamp}-${i}`}
+                                type="button"
+                                className="group overflow-hidden rounded-lg border bg-card p-1 text-left transition-shadow hover:shadow-md hover:ring-1 hover:ring-primary/30"
+                                onClick={() =>
+                                  setLightboxImg({
+                                    src: shot.url,
+                                    alt: `Camera screenshot at ${new Date(shot.timestamp).toLocaleTimeString()}`,
+                                  })
+                                }
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={shot.url}
+                                  alt={`Camera at ${new Date(shot.timestamp).toLocaleTimeString()}`}
+                                  className="h-24 w-full rounded object-cover"
+                                />
+                                <p className="mt-0.5 text-center text-[10px] text-muted-foreground/60">
+                                  {new Date(shot.timestamp).toLocaleTimeString(
+                                    undefined,
+                                    {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  )}
+                                </p>
+                              </button>
+                            ) : (
+                              <div
+                                key={`${shot.timestamp}-${i}`}
+                                className="flex h-28 flex-col items-center justify-center gap-1 rounded-lg border bg-muted/30 p-2 text-center text-xs text-muted-foreground"
+                              >
+                                <span>Image withheld</span>
+                                <span>
+                                  {new Date(shot.timestamp).toLocaleTimeString(
+                                    undefined,
+                                    {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  )}
+                                </span>
+                              </div>
+                            ),
+                          )}
                         </div>
                       </div>
                     )}
