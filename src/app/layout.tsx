@@ -13,8 +13,11 @@ const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://Bheem-ai.com";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   icons: {
-    icon: "/favicon.ico",
-    apple: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico", sizes: "32x32", type: "image/x-icon" },
+      { url: "/bheem-icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
   },
   title: {
     default: "Bheem - AI Interview Platform | Voice & Video Interviews",
