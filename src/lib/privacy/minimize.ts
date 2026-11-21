@@ -18,13 +18,20 @@ const REPLACEMENTS: Record<PIIType, string> = {
   ip_address: "[IP]",
   iban: "[IBAN]",
   credential: "[SECRET]",
+  personal_id: "[ID]",
 };
 
 const detector = new PIIDetector();
 
 /** Remove supported direct identifiers before text reaches a hosted model. */
-export function minimizePii(input: string): PrivacyResult {
-  const entities = detector.detectPII(input).filter(
+export function minimizePii(
+  input: string,
+  options: { resume?: boolean } = {},
+): PrivacyResult {
+  const detectedEntities = options.resume
+    ? detector.detectResumePII(input)
+    : detector.detectPII(input);
+  const entities = detectedEntities.filter(
     (entity) => entity.confidence >= 0.7,
   );
   let text = input;

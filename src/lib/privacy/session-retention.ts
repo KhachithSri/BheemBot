@@ -117,9 +117,6 @@ export async function purgeExpiredSessionContent(
             insights: null,
             themes: [],
             sentiment: null,
-            audioRecordingUrl: null,
-            audioRecordings: [],
-            audioDuration: null,
             screenshots: null,
             antiCheatingLog: [],
           })

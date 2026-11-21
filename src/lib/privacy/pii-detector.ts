@@ -9,7 +9,8 @@ export type PIIType =
   | "url"
   | "ip_address"
   | "iban"
-  | "credential";
+  | "credential"
+  | "personal_id";
 
 export interface PIIEntity {
   type: PIIType;
@@ -35,18 +36,22 @@ const PATTERNS: Partial<Record<PIIType, RegExp>> = {
     /\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})\b/g,
 };
 
+const PERSONAL_ID_PATTERN =
+  /\b(?:registration(?:\s*(?:id|no\.?|number))?|register(?:\s*(?:id|no\.?|number))?|reg\.?(?:\s*(?:id|no\.?|number))?|roll(?:\s*(?:id|no\.?|number))?|enrol(?:l)?ment(?:\s*(?:id|no\.?|number))?|student\s*(?:id|no\.?|number)|candidate\s*(?:id|no\.?|number)|application\s*(?:id|no\.?|number)|employee\s*(?:id|no\.?|number)|admission\s*(?:id|no\.?|number)|university\s*(?:id|no\.?|number)|passport(?:\s*(?:no\.?|number))?|aadhaar|aadhar|pan)\s*[:=#-]?\s*(\d{4}(?:[ \t-]\d{4}){2}|[A-Z0-9][A-Z0-9/-]{2,})\b/gi;
+
 const TYPE_PRIORITY: Record<PIIType, number> = {
   credential: 0,
   email: 1,
   url: 2,
-  credit_card: 3,
-  iban: 4,
-  ssn: 5,
-  dob: 6,
-  ip_address: 7,
-  address: 8,
-  phone: 9,
-  name: 10,
+  personal_id: 3,
+  credit_card: 4,
+  iban: 5,
+  ssn: 6,
+  dob: 7,
+  ip_address: 8,
+  address: 9,
+  phone: 10,
+  name: 11,
 };
 
 function confidenceFor(type: PIIType, value: string): number {
@@ -59,7 +64,55 @@ function confidenceFor(type: PIIType, value: string): number {
   }
   if (type === "iban") return 0.85;
   if (type === "name") return 0.7;
+  if (type === "personal_id") return 0.95;
   return 0.95;
+}
+
+const RESUME_HEADER_EXCLUSIONS = new Set([
+  "analyst",
+  "business",
+  "candidate",
+  "contact",
+  "curriculum",
+  "developer",
+  "director",
+  "education",
+  "engineer",
+  "experience",
+  "intern",
+  "manager",
+  "objective",
+  "professional",
+  "profile",
+  "registration",
+  "resume",
+  "roll",
+  "senior",
+  "software",
+  "specialist",
+  "student",
+  "summary",
+  "no",
+]);
+
+function isResumeHeaderName(value: string): boolean {
+  const tokens = value.trim().split(/\s+/);
+  if (tokens.length < 2 || tokens.length > 4) return false;
+  if (
+    !tokens.every((token) => /^[A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F'’-]*\.?$/.test(token))
+  ) {
+    return false;
+  }
+  if (
+    tokens.some((token) =>
+      RESUME_HEADER_EXCLUSIONS.has(token.replace(/\.$/, "").toLowerCase()),
+    )
+  ) {
+    return false;
+  }
+  return tokens.every(
+    (token) => token[0] === token[0]?.toLocaleUpperCase(),
+  );
 }
 
 function selectNonOverlapping(entities: PIIEntity[]): PIIEntity[] {
@@ -103,6 +156,21 @@ export class PIIDetector {
       }
     }
 
+    PERSONAL_ID_PATTERN.lastIndex = 0;
+    let idMatch: RegExpExecArray | null;
+    while ((idMatch = PERSONAL_ID_PATTERN.exec(text)) !== null) {
+      const value = idMatch[1];
+      if (!value) continue;
+      const valueOffset = idMatch[0].lastIndexOf(value);
+      entities.push({
+        type: "personal_id",
+        value,
+        start: idMatch.index + valueOffset,
+        end: idMatch.index + valueOffset + value.length,
+        confidence: confidenceFor("personal_id", value),
+      });
+    }
+
     const namePattern =
       /\b(?:my name is|i am|i'm|this is|candidate(?: name)?\s*[:=])\s+([A-Z][a-z]+(?:[-'][A-Z]?[a-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Z]?[a-z]+)?){0,2})/gi;
     namePattern.lastIndex = 0;
@@ -118,6 +186,75 @@ export class PIIDetector {
         end: nameMatch.index + nameOffset + name.length,
         confidence: confidenceFor("name", name),
       });
+    }
+
+    return selectNonOverlapping(entities);
+  }
+
+  detectResumePII(text: string): PIIEntity[] {
+    const entities = this.detectPII(text);
+    const lines: RegExpExecArray[] = [];
+    const linePattern = /[^\r\n]+/g;
+    let line: RegExpExecArray | null;
+    while ((line = linePattern.exec(text)) !== null && lines.length < 8) {
+      if (line[0].trim()) lines.push(line);
+    }
+
+    for (const line of lines) {
+      const sanitized = line[0].split("");
+      for (const entity of entities) {
+        const start = Math.max(entity.start, line.index ?? 0);
+        const end = Math.min(entity.end, (line.index ?? 0) + line[0].length);
+        for (let index = start; index < end; index++) {
+          sanitized[index - (line.index ?? 0)] = " ";
+        }
+      }
+
+      PERSONAL_ID_PATTERN.lastIndex = 0;
+      let idMatch: RegExpExecArray | null;
+      while ((idMatch = PERSONAL_ID_PATTERN.exec(text)) !== null) {
+        const start = Math.max(idMatch.index, line.index ?? 0);
+        const end = Math.min(
+          idMatch.index + idMatch[0].length,
+          (line.index ?? 0) + line[0].length,
+        );
+        for (let index = start; index < end; index++) {
+          sanitized[index - (line.index ?? 0)] = " ";
+        }
+      }
+
+      const sanitizedLine = sanitized.join("");
+      const segments = sanitizedLine.split(
+        /\s+(?:\||•|·|,|;|[-–—])\s+|[|•·,;]+/,
+      );
+      let segmentOffset = 0;
+      for (const segment of segments) {
+        const foundAt = sanitizedLine.indexOf(segment, segmentOffset);
+        if (foundAt < 0) continue;
+        const trimmed = segment.trim();
+        const leadingWhitespace = segment.length - segment.trimStart().length;
+        const start = foundAt + leadingWhitespace;
+        if (isResumeHeaderName(trimmed)) {
+          const absoluteStart = (line.index ?? 0) + start;
+          const alreadyDetected = entities.some(
+            (entity) =>
+              entity.type === "name" &&
+              entity.start === absoluteStart &&
+              entity.end === absoluteStart + trimmed.length,
+          );
+          if (!alreadyDetected) {
+            entities.push({
+              type: "name",
+              value: trimmed,
+              start: absoluteStart,
+              end: absoluteStart + trimmed.length,
+              confidence: confidenceFor("name", trimmed),
+            });
+          }
+          return selectNonOverlapping(entities);
+        }
+        segmentOffset = foundAt + segment.length;
+      }
     }
 
     return selectNonOverlapping(entities);

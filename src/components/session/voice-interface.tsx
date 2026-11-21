@@ -660,8 +660,6 @@ export function VoiceInterface({
     onTranscript: handleTranscript,
     onAIResponse: handleAIResponse,
     onError: handleError,
-    onTtsChunk: videoMode ? recording.addTtsChunk : undefined,
-    onInterrupt: videoMode ? recording.cancelTts : undefined,
   });
 
   useEffect(() => {
@@ -681,18 +679,8 @@ export function VoiceInterface({
   useEffect(() => {
     if (!videoMode || !voice.isConnected || recordingStartedRef.current) return;
     recordingStartedRef.current = true;
-    const micStream = voice.mediaStreamRef.current;
-    recording.start(micStream ?? undefined);
+    recording.start();
   }, [videoMode, voice.isConnected]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Attach mic stream to recording when it becomes available
-  useEffect(() => {
-    if (!videoMode || !voice.isListening) return;
-    const micStream = voice.mediaStreamRef.current;
-    if (micStream) {
-      recording.attachMicStream(micStream);
-    }
-  }, [videoMode, voice.isListening]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Countdown timer (starts when voice connects) ────────────────
   useEffect(() => {
@@ -1208,8 +1196,6 @@ export function VoiceInterface({
               body: JSON.stringify({
                 json: {
                   sessionId,
-                  audioRecordingUrl: result.audioUrl,
-                  audioDuration: result.audioDuration,
                   screenshots: result.screenshots,
                 },
               }),

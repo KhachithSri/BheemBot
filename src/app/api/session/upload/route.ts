@@ -5,12 +5,12 @@ import { NextResponse } from "next/server";
 const log = createLogger("api/session/upload");
 
 /**
- * Upload a file (audio recording or screenshot) to Supabase Storage.
+ * Upload a screenshot to Supabase Storage.
  *
  * Expects multipart FormData with:
  *   - file: Blob/File
  *   - sessionId: string
- *   - type: "recording" | "screenshot"
+ *   - type: "screenshot"
  *   - filename: string (optional, used as the storage path suffix)
  */
 export async function POST(req: Request) {
@@ -28,10 +28,10 @@ export async function POST(req: Request) {
       );
     }
 
-    if (type !== "recording" && type !== "screenshot") {
+    if (type !== "screenshot") {
       return NextResponse.json(
-        { error: 'type must be "recording" or "screenshot"' },
-        { status: 400 },
+        { error: "Audio recordings are not stored" },
+        { status: 403 },
       );
     }
 
@@ -60,17 +60,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const bucket = type === "recording" ? "recordings" : "screenshots";
-    const defaultExt = type === "recording"
-      ? (file.type?.includes("mp4") || file.type?.includes("m4a") ? "m4a" : "webm")
-      : "jpg";
+    const bucket = "screenshots";
+    const defaultExt = "jpg";
     const storagePath = `${sessionId}/${filename || `${Date.now()}.${defaultExt}`}`;
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    const defaultContentType = type === "recording"
-      ? (file.type?.includes("mp4") ? "audio/mp4" : "audio/webm")
-      : "image/jpeg";
+    const defaultContentType = "image/jpeg";
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from(bucket)

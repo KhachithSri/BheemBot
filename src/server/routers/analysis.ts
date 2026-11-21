@@ -54,20 +54,7 @@ export const analysisRouter = router({
         throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this project" });
       }
 
-      // Generate fresh signed URLs for recordings and screenshots
-      let audioRecordingUrl: string | null = null;
-      if (session.audioRecordingUrl) {
-        // Extract path from stored URL or use directly if it's a path
-        const storedUrl = session.audioRecordingUrl as string;
-        const pathMatch = storedUrl.match(/\/recordings\/(.+?)(?:\?|$)/);
-        if (pathMatch) {
-          audioRecordingUrl = await resolveSignedUrl("recordings", pathMatch[1]);
-        }
-        if (!audioRecordingUrl) {
-          audioRecordingUrl = storedUrl;
-        }
-      }
-
+      // Generate fresh signed URLs for screenshots
       let screenshots: ScreenshotEntry[] | null = null;
       const rawScreenshots = session.screenshots as ScreenshotEntry[] | null;
       if (rawScreenshots && rawScreenshots.length > 0) {
@@ -94,8 +81,6 @@ export const analysisRouter = router({
         sentiment: session.sentiment,
         messages: session.messages,
         totalDurationSeconds: session.totalDurationSeconds,
-        audioRecordingUrl,
-        audioDuration: (session as Record<string, unknown>).audioDuration as number | null,
         screenshots,
         antiCheatingLog: (session as Record<string, unknown>).antiCheatingLog as
           | { type: string; timestamp: number; detail?: string }[]

@@ -1,4 +1,5 @@
 import { DashboardShell } from "@/components/layout/sidebar";
+import { DashboardWelcomeGate } from "@/components/layout/dashboard-welcome-gate";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -16,5 +17,9 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  return <DashboardShell>{children}</DashboardShell>;
+  return (
+    <DashboardWelcomeGate>
+      <DashboardShell>{children}</DashboardShell>
+    </DashboardWelcomeGate>
+  );
 }

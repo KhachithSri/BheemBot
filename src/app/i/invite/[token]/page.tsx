@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { CandidateWelcomeScreen } from "@/components/interview/candidate-welcome-screen";
 import { trpc } from "@/lib/trpc/client";
 import {
   Card,
@@ -13,13 +14,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { CandidateResumeUpload } from "@/components/interview/candidate-resume-upload";
 import { Link2Off, CheckCircle2 } from "lucide-react";
-import { PreparingScreen } from "@/components/session/preparing-screen";
+import { useWelcomeScreenDelay } from "@/hooks/use-welcome-screen-delay";
 import { useToast } from "@/hooks/use-toast";
 import type { CandidateQuestionPersonalization } from "@/lib/ai/types";
 
 export default function InvitePage() {
   const params = useParams();
   const token = params.token as string;
+  const showWelcomeScreen = useWelcomeScreenDelay(token);
   const router = useRouter();
   const { toast } = useToast();
 
@@ -57,7 +59,7 @@ export default function InvitePage() {
   }, [router, sessionPath]);
 
   useEffect(() => {
-    if (!candidate.data || completed) return;
+    if (!candidate.data || completed || showWelcomeScreen) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const session = (candidate.data as any).session;
@@ -70,11 +72,11 @@ export default function InvitePage() {
       return;
     }
 
-  }, [candidate.data, completed, goToSession]);
+  }, [candidate.data, completed, goToSession, showWelcomeScreen]);
 
   // Loading
-  if (candidate.isLoading) {
-    return <PreparingScreen />;
+  if (showWelcomeScreen || candidate.isLoading) {
+    return <CandidateWelcomeScreen />;
   }
 
   // Error / invalid token

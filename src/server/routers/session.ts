@@ -856,8 +856,6 @@ export const sessionRouter = router({
     .input(
       z.object({
         sessionId: z.string(),
-        audioRecordingUrl: z.string().optional(),
-        audioDuration: z.number().optional(),
         screenshots: z
           .array(
             z.object({
@@ -891,12 +889,6 @@ export const sessionRouter = router({
       }
 
       const updateData: Record<string, unknown> = {};
-      if (input.audioRecordingUrl) {
-        updateData.audioRecordingUrl = input.audioRecordingUrl;
-      }
-      if (input.audioDuration !== undefined) {
-        updateData.audioDuration = input.audioDuration;
-      }
       if (input.screenshots) {
         updateData.screenshots = input.screenshots;
       }

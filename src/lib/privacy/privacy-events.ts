@@ -2,19 +2,30 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { minimizePii } from "./minimize";
 
 export async function recordPrivacyEvents(
-  entries: Array<{ sessionId: string; messageId?: string | null; content: string }>,
+  entries: Array<{
+    sessionId?: string | null;
+    messageId?: string | null;
+    content: string;
+    source?: "resume_parse";
+    includeMaskedContent?: boolean;
+  }>,
 ): Promise<void> {
   const events = entries.flatMap((entry) => {
-    const result = minimizePii(entry.content);
+    const result = minimizePii(entry.content, {
+      resume: entry.source === "resume_parse",
+    });
     if (result.redactions === 0) return [];
 
     return [{
-      session_id: entry.sessionId,
+      ...(entry.sessionId ? { session_id: entry.sessionId } : {}),
       ...(entry.messageId ? { message_id: entry.messageId } : {}),
       pii_types: result.types,
       pii_count: result.redactions,
-      masked_content: result.text,
+      ...(entry.includeMaskedContent === false
+        ? {}
+        : { masked_content: result.text }),
       confidence_threshold: 0.7,
+      ...(entry.source ? { metadata: { source: entry.source } } : {}),
     }];
   });
 

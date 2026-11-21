@@ -1,12 +1,13 @@
 "use client";
 
-import { PreparingScreen } from "@/components/session/preparing-screen";
+import { CandidateWelcomeScreen } from "@/components/interview/candidate-welcome-screen";
 import { CandidateResumeUpload } from "@/components/interview/candidate-resume-upload";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { useWelcomeScreenDelay } from "@/hooks/use-welcome-screen-delay";
 import { trpc } from "@/lib/trpc/client";
 import type { CandidateQuestionPersonalization } from "@/lib/ai/types";
 import { CheckCircle2, Link2Off, Loader2, Lock, MessageSquare, Mic, Plus, RotateCcw, ShieldCheck } from "lucide-react";
@@ -18,6 +19,7 @@ const STORAGE_PREFIX = "Bheem_session_";
 export default function PublicInterviewPage() {
   const params = useParams();
   const slug = params.slug as string;
+  const showWelcomeScreen = useWelcomeScreenDelay(slug);
   const router = useRouter();
   const searchParams = useSearchParams();
   const isPreview = searchParams.get("preview") === "true";
@@ -25,10 +27,10 @@ export default function PublicInterviewPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (isPreview && sidParam) {
+    if (isPreview && sidParam && !showWelcomeScreen) {
       router.replace(`/i/${slug}/session?sid=${sidParam}&preview=true`);
     }
-  }, [isPreview, sidParam, slug, router]);
+  }, [isPreview, sidParam, slug, router, showWelcomeScreen]);
 
   const [participantName, setParticipantName] = useState("");
   const [participantEmail, setParticipantEmail] = useState("");
@@ -99,12 +101,12 @@ export default function PublicInterviewPage() {
     setStoredSessionId(null);
   }, [slug]);
 
-  if (isPreview && sidParam) {
-    return <PreparingScreen />;
+  if (showWelcomeScreen || (isPreview && sidParam)) {
+    return <CandidateWelcomeScreen />;
   }
 
   if (interview.isLoading) {
-    return <PreparingScreen />;
+    return <CandidateWelcomeScreen />;
   }
 
   if (interview.isError || !interview.data) {
@@ -145,7 +147,7 @@ export default function PublicInterviewPage() {
   }
 
   if (storedSessionId && existingSession.isLoading) {
-    return <PreparingScreen />;
+    return <CandidateWelcomeScreen />;
   }
 
   return (

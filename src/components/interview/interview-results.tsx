@@ -218,7 +218,6 @@ function SessionDetail({
     src: string;
     alt: string;
   } | null>(null);
-  const [audioCanPlay, setAudioCanPlay] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
   const [exportPercent, setExportPercent] = useState(0);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -1192,27 +1191,6 @@ function SessionDetail({
                 </Card>
               );
             })()}
-
-            {/* Audio Recording — hidden until audio is loadable */}
-            {summary.data?.audioRecordingUrl && (
-              <Card className={cn(!audioCanPlay && "hidden")}>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Mic className="h-4 w-4" />
-                    Audio Recording
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <audio
-                    controls
-                    preload="auto"
-                    src={summary.data.audioRecordingUrl}
-                    className="w-full"
-                    onCanPlay={() => setAudioCanPlay(true)}
-                  />
-                </CardContent>
-              </Card>
-            )}
 
             {/* Screenshots */}
             {(() => {
